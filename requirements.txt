@@ -1,0 +1,4 @@
+# 本项目仅使用了 Python 的内置标准库 (如 tkinter, ast, difflib, csv, threading 等)。
+# 因此，不需要通过 pip 安装任何第三方库。
+# 
+# 保持此文件存在是为了符合 Python 项目的通用最佳实践规范。

@@ -3,7 +3,7 @@
 代码对比窗口模块
 
 这个文件定义了 `ComparisonWindow` 类，它是一个独立的弹出窗口，
-用于并排显示两个代码文件，并高亮它们的相似之处。
+用于并排显示多个代码文件，并高亮它们的相似之处与差异。
 """
 
 import tkinter as tk
@@ -13,130 +13,255 @@ import difflib
 
 class ComparisonWindow(tk.Toplevel):
     """
-    一个 Toplevel 窗口，用于并排显示和比较两个文本文件。
+    一个 Toplevel 窗口，用于并排显示和比较多个文本文件。
     Toplevel 就像是一个新的、独立的子窗口。
     """
-    def __init__(self, parent, file1_path, file2_path):
+    def __init__(self, parent, file_paths, original_path=None):
         """
-        初始化对比窗口。
+        初始化多文件对比窗口。
 
         Args:
             parent: 父窗口实例 (这里是主应用的实例)。
-            file1_path (str): 第一个待比较文件的路径。
-            file2_path (str): 第二个待比较文件的路径。
+            file_paths (list): 待比较文件的路径列表。
+            original_path (str, optional): 疑似原创文件的路径。
         """
-        # super().__init__(parent) 调用父类的构造函数，完成窗口的基本设置
         super().__init__(parent)
-        self.title("代码对比")
-        self.geometry("1200x800")  # 设置窗口的默认大小
+        self.title("多文件代码对比")
+        self.geometry("1400x800")  # 设置窗口的默认大小为更宽，以适应多个文件
+
+        self.file_paths = file_paths
+        self.original_path = original_path
+        self.text_widgets = []
+        self.line_widgets = []
+        self.y_scrollbars = []
+
+        # --- 工具栏与图例 ---
+        top_bar = ttk.Frame(self, padding=(10, 10, 10, 0))
+        top_bar.pack(fill=tk.X, side=tk.TOP)
+        
+        # 风格切换控件
+        self.theme_var = tk.StringVar(value="专业模式 (弱化相同)")
+        theme_combo = ttk.Combobox(top_bar, textvariable=self.theme_var, values=["专业模式 (弱化相同)", "查重模式 (标红抄袭)"], state="readonly", width=20)
+        theme_combo.pack(side=tk.RIGHT, padx=5)
+        theme_combo.bind("<<ComboboxSelected>>", self.apply_theme)
+        ttk.Label(top_bar, text="配色风格:").pack(side=tk.RIGHT)
+
+        self.legend_frame = ttk.Frame(top_bar)
+        self.legend_frame.pack(side=tk.LEFT, fill=tk.X)
 
         # --- 创建UI布局 ---
-        # 主框架，用于容纳左右两个文件显示区
+        # 主框架
         main_frame = ttk.Frame(self, padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # 左侧框架，用于显示第一个文件，LabelFrame 带有一个标题框
-        frame1 = ttk.LabelFrame(main_frame, text=os.path.basename(file1_path), padding=5)
-        frame1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        # --- 【教学说明】Canvas 嵌套技巧 ---
+        # Tkinter 的普通 Frame 是不支持加滚动条的。
+        # 当你同时对比 3 个、4 个甚至更多文件时，屏幕宽度不够怎么办？
+        # 解决套路：先创建一个画布 (Canvas)，把 Canvas 加上水平滚动条，
+        # 然后把真正装代码的 files_frame 当作“一幅画”塞进 Canvas 里。
+        self.canvas = tk.Canvas(main_frame, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(main_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
         
-        # 右侧框架，用于显示第二个文件
-        frame2 = ttk.LabelFrame(main_frame, text=os.path.basename(file2_path), padding=5)
-        frame2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
+        self.files_frame = ttk.Frame(self.canvas)
+        
+        # 将 files_frame 放入 canvas
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.files_frame, anchor="nw")
+        
+        def configure_scrollregion(event):
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            
+        def configure_canvas(event):
+            self.canvas.itemconfig(self.canvas_window, height=event.height)
+            req_width = self.files_frame.winfo_reqwidth()
+            if req_width < event.width:
+                self.canvas.itemconfig(self.canvas_window, width=event.width)
+            else:
+                self.canvas.itemconfig(self.canvas_window, width="")
 
-        # --- 创建文本显示框 (Text Widget) ---
-        # wrap=tk.NONE 表示不自动换行，结合水平滚动条查看长代码行
-        # font 指定了文本的字体和大小，使用等宽字体 "Courier New" 能让代码对得更整齐
-        self.text1 = tk.Text(frame1, wrap=tk.NONE, font=("Courier New", 10))
-        self.text2 = tk.Text(frame2, wrap=tk.NONE, font=("Courier New", 10))
+        self.files_frame.bind("<Configure>", configure_scrollregion)
+        self.canvas.bind("<Configure>", configure_canvas)
+        self.canvas.configure(xscrollcommand=self.scrollbar.set)
 
-        # --- 创建滚动条 ---
-        self.scroll1_y = ttk.Scrollbar(frame1, orient=tk.VERTICAL, command=self.text1.yview)
-        self.scroll1_x = ttk.Scrollbar(frame1, orient=tk.HORIZONTAL, command=self.text1.xview)
-        self.text1.config(yscrollcommand=self.scroll1_y.set, xscrollcommand=self.scroll1_x.set)
+        self.scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        self.scroll2_y = ttk.Scrollbar(frame2, orient=tk.VERTICAL, command=self.text2.yview)
-        self.scroll2_x = ttk.Scrollbar(frame2, orient=tk.HORIZONTAL, command=self.text2.xview)
-        self.text2.config(yscrollcommand=self.scroll2_y.set, xscrollcommand=self.scroll2_x.set)
+        # 当文件较多时，调整默认文本框宽度以防过宽
+        text_width = 50 if len(file_paths) > 2 else 80
 
-        # 将滚动条和文本框打包到界面上
-        self.scroll1_y.pack(side=tk.RIGHT, fill=tk.Y)
-        self.scroll2_y.pack(side=tk.RIGHT, fill=tk.Y)
-        self.scroll1_x.pack(side=tk.BOTTOM, fill=tk.X)
-        self.scroll2_x.pack(side=tk.BOTTOM, fill=tk.X)
-        self.text1.pack(fill=tk.BOTH, expand=True)
-        self.text2.pack(fill=tk.BOTH, expand=True)
+        # 针对每个文件，创建一个并排的框架
+        for i, path in enumerate(file_paths):
+            title = os.path.basename(path)
+            if path == original_path:
+                title += " (疑似原创)"
+            
+            frame = ttk.LabelFrame(self.files_frame, text=title, padding=5)
+            # 平均分配空间
+            frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
 
-        # --- 绑定同步滚动事件 ---
-        # 当在一个文本框里滚动鼠标滚轮时，另一个也跟着动
-        self.text1.bind("<MouseWheel>", self.on_scroll)
-        self.text2.bind("<MouseWheel>", self.on_scroll)
-        # 当拖动一个滚动条时，另一个也跟着动
-        self.scroll1_y.bind("<B1-Motion>", lambda e: self.sync_scroll(self.text1, self.text2))
-        self.scroll2_y.bind("<B1-Motion>", lambda e: self.sync_scroll(self.text2, self.text1))
+            # 行号文本框
+            line_widget = tk.Text(frame, width=4, padx=3, takefocus=0, border=0, background="#f0f0f0", state=tk.DISABLED, font=("Courier New", 10), wrap=tk.NONE)
+            line_widget.pack(side=tk.LEFT, fill=tk.Y)
+            self.line_widgets.append(line_widget)
+
+            # 文本框 (清理了上一次修改导致的重复代码)
+            # 修改了 bg (背景色) 和 fg (前景色)，让相同代码默认呈现柔和的灰色
+            text_widget = tk.Text(frame, wrap=tk.NONE, font=("Courier New", 10), width=text_width, bg="#f8f8f8", fg="#7a7a7a", selectbackground="#0078D7", selectforeground="white", exportselection=False)
+            self.text_widgets.append(text_widget)
+
+            # 滚动条
+            scroll_y = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=text_widget.yview)
+            scroll_x = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=text_widget.xview)
+            
+            # 使用闭包，当文本框Y轴滚动时，同时更新滚动条和旁边的行号框
+            def sync_line_and_scroll(*args, sy=scroll_y.set, lw=line_widget):
+                sy(*args)
+                lw.yview_moveto(args[0])
+                
+            text_widget.config(yscrollcommand=sync_line_and_scroll, xscrollcommand=scroll_x.set)
+            
+            self.y_scrollbars.append(scroll_y)
+
+            scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+            scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+            text_widget.pack(fill=tk.BOTH, expand=True)
+
+            # 绑定鼠标滚轮事件 (<MouseWheel> 在 Windows 上有效)
+            text_widget.bind("<MouseWheel>", self.on_scroll)
+            # 绑定拖动滚动条同步
+            # 【教学说明】lambda 与默认参数
+            # 这里使用 lambda 匿名函数将当前循环的 text_widget 保存到 source 变量中。
+            # <B1-Motion> 代表鼠标左键按下并拖动的事件。
+            scroll_y.bind("<B1-Motion>", lambda e, source=text_widget: self.sync_scroll(source))
 
         # --- 加载文件内容并高亮 ---
-        self.load_and_highlight(file1_path, file2_path)
+        self.load_and_highlight()
 
     def on_scroll(self, event):
-        """处理鼠标滚轮事件，实现两个文本框的同步滚动。"""
-        # event.delta 在 Windows 上通常是 120 的倍数
-        # 除以 120 得到滚动的“单位”数，乘以 -1 是因为滚轮向上滚动 delta 为正，但文本应该向上移动
-        self.text1.yview_scroll(-1 * (event.delta // 120), "units")
-        self.text2.yview_scroll(-1 * (event.delta // 120), "units")
-        # return "break" 阻止事件继续传播，防止窗口本身也滚动
+        """处理鼠标滚轮事件，实现所有文本框的同步滚动。"""
+        scroll_units = -1 * (event.delta // 120)
+        for text_widget in self.text_widgets:
+            text_widget.yview_scroll(scroll_units, "units")
         return "break"
 
-    def sync_scroll(self, source, target):
+    def sync_scroll(self, source):
         """处理拖动滚动条事件，实现同步。"""
-        # 获取源文本框的滚动条位置
         source_pos = source.yview()
-        # 将目标文本框移动到相同的位置
-        target.yview_moveto(source_pos[0])
+        for text_widget in self.text_widgets:
+            if text_widget != source:
+                text_widget.yview_moveto(source_pos[0])
 
-    def load_and_highlight(self, file1_path, file2_path):
-        """加载两个文件的内容，并使用 difflib 来高亮相似和不同的部分。"""
-        try:
-            # .readlines() 将文件内容读取为一个行的列表
-            with open(file1_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content1 = f.readlines()
-            with open(file2_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content2 = f.readlines()
-        except IOError:
-            self.text1.insert(tk.END, "错误：无法读取文件。")
-            self.text2.insert(tk.END, "错误：无法读取文件。")
-            return
+    def load_and_highlight(self):
+        """加载所有文件的内容，并使用基准文件高亮差异。"""
+        contents = []
+        for path in self.file_paths:
+            try:
+                with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                    contents.append(f.readlines())
+            except IOError:
+                contents.append(["错误：无法读取文件。\n"])
 
-        # --- 定义高亮样式 ---
-        # tag_configure 用于定义一个“标签”，我们可以给这个标签设置样式
-        # 后面可以把这个标签应用到文本的特定范围上
-        self.text1.tag_configure("highlight", background="#d2f4d2")  # 相似部分使用淡绿色背景
-        self.text2.tag_configure("highlight", background="#d2f4d2")
-        self.text1.tag_configure("diff", background="#ffdddd")  # 差异部分使用淡红色背景
-        self.text2.tag_configure("diff", background="#ffdddd")
+        # 确定基准文件索引（如果提供了疑似原创文件，则使用它；否则使用第一个文件）
+        baseline_idx = 0
+        if self.original_path in self.file_paths:
+            baseline_idx = self.file_paths.index(self.original_path)
 
-        # 创建 SequenceMatcher 对象，用于比较两个行列表
-        seq_matcher = difflib.SequenceMatcher(None, content1, content2)
+        # 插入内容并配置样式
+        for i, (text_widget, lines) in enumerate(zip(self.text_widgets, contents)):
+            
+            # 提高 sel (选中状态) 标签的优先级，确保蓝底白字的高亮不被上面的背景色覆盖
+            text_widget.tag_raise("sel")
+            
+            for line in lines:
+                text_widget.insert(tk.END, line)
+                
+            # 注入行号数字
+            line_widget = self.line_widgets[i]
+            line_widget.config(state=tk.NORMAL)
+            for line_num in range(1, len(lines) + 1):
+                line_widget.insert(tk.END, f"{line_num}\n")
+            line_widget.config(state=tk.DISABLED)
 
-        # 先将全部内容插入到文本框中
-        for line in content1:
-            self.text1.insert(tk.END, line)
-        for line in content2:
-            self.text2.insert(tk.END, line)
+        # 进行高亮比对
+        baseline_lines = contents[baseline_idx]
+        baseline_widget = self.text_widgets[baseline_idx]
+
+        for i, text_widget in enumerate(self.text_widgets):
+            if i == baseline_idx:
+                continue
+            
+            compare_lines = contents[i]
+            seq_matcher = difflib.SequenceMatcher(None, baseline_lines, compare_lines)
+
+            for tag, i1, i2, j1, j2 in seq_matcher.get_opcodes():
+                if tag == 'equal':
+                    # 标记相同代码（即抄袭部分），供切换主题使用
+                    baseline_widget.tag_add("identical", f"{i1 + 1}.0", f"{i2 + 1}.0")
+                    text_widget.tag_add("identical", f"{j1 + 1}.0", f"{j2 + 1}.0")
+                elif tag in ('replace', 'insert', 'delete'):
+                    # 有差异的部分背景
+                    if tag in ('replace', 'delete'):
+                        baseline_widget.tag_add("diff_bg_del", f"{i1 + 1}.0", f"{i2 + 1}.0")
+                    if tag in ('replace', 'insert'):
+                        text_widget.tag_add("diff_bg_add", f"{j1 + 1}.0", f"{j2 + 1}.0")
+                        
+                    if tag == 'replace':
+                        # 逐行进行行内高亮
+                        for line_offset in range(max(i2 - i1, j2 - j1)):
+                            bl_idx = i1 + line_offset
+                            comp_idx = j1 + line_offset
+                            
+                            if bl_idx < i2 and comp_idx < j2:
+                                bl_line = baseline_lines[bl_idx]
+                                comp_line = compare_lines[comp_idx]
+                                char_matcher = difflib.SequenceMatcher(None, bl_line, comp_line)
+                                for c_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
+                                    if c_tag in ('replace', 'delete'):
+                                        baseline_widget.tag_add("diff_del", f"{bl_idx + 1}.{ci1}", f"{bl_idx + 1}.{ci2}")
+                                    if c_tag in ('replace', 'insert'):
+                                        text_widget.tag_add("diff_add", f"{comp_idx + 1}.{cj1}", f"{comp_idx + 1}.{cj2}")
+                            elif bl_idx < i2:
+                                baseline_widget.tag_add("diff_del", f"{bl_idx + 1}.0", f"{bl_idx + 2}.0")
+                            elif comp_idx < j2:
+                                text_widget.tag_add("diff_add", f"{comp_idx + 1}.0", f"{comp_idx + 2}.0")
+                    elif tag == 'delete':
+                        baseline_widget.tag_add("diff_del", f"{i1 + 1}.0", f"{i2 + 1}.0")
+                    elif tag == 'insert':
+                        text_widget.tag_add("diff_add", f"{j1 + 1}.0", f"{j2 + 1}.0")
+
+        # 所有标签添加完毕后，应用默认主题渲染
+        self.apply_theme()
+
+    def apply_theme(self, event=None):
+        """动态切换高亮配色风格"""
+        theme = self.theme_var.get()
         
-        # --- 应用高亮 ---
-        # get_opcodes() 是 difflib 的核心，它返回一个指令列表，告诉我们
-        #如何从第一个序列变成第二个序列。
-        # 每个指令是一个元组 (tag, i1, i2, j1, j2)，其中：
-        # - tag: 'equal'(相同), 'replace'(替换), 'delete'(删除), 'insert'(插入)
-        # - i1, i2: 第一个序列中的范围 (从 i1 到 i2-1)
-        # - j1, j2: 第二个序列中的范围 (从 j1 到 j2-1)
-        for tag, i1, i2, j1, j2 in seq_matcher.get_opcodes():
-            if tag == 'equal':
-                # 如果是 'equal'，我们就用 "highlight" 标签高亮这部分
-                # Text widget 的索引是 "行.列" 的形式，例如 "1.0" 是第一行第0列
-                self.text1.tag_add("highlight", f"{i1 + 1}.0", f"{i2}.0 + 1 chars")
-                self.text2.tag_add("highlight", f"{j1 + 1}.0", f"{j2}.0 + 1 chars")
-            elif tag == 'replace':
-                # 如果是 'replace'，我们就用 "diff" 标签高亮这部分
-                self.text1.tag_add("diff", f"{i1 + 1}.0", f"{i2}.0 + 1 chars")
-                self.text2.tag_add("diff", f"{j1 + 1}.0", f"{j2}.0 + 1 chars")
+        # 清空现有图例
+        for widget in self.legend_frame.winfo_children():
+            widget.destroy()
+            
+        ttk.Label(self.legend_frame, text="图例说明:").pack(side=tk.LEFT, padx=(0, 10))
+        
+        if theme == "专业模式 (弱化相同)":
+            tk.Label(self.legend_frame, text=" 相同代码 (灰色文字) ", bg="#f8f8f8", fg="#7a7a7a", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
+            tk.Label(self.legend_frame, text=" 基准文件修改 ", bg="#ffe6e6", fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
+            tk.Label(self.legend_frame, text=" 疑似文件修改 ", bg="#e6ffe6", fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
+            
+            for text_widget in self.text_widgets:
+                text_widget.config(bg="#f8f8f8", fg="#7a7a7a")
+                text_widget.tag_configure("identical", background="#f8f8f8", foreground="#7a7a7a")
+                text_widget.tag_configure("diff_bg_del", background="#ffe6e6", foreground="black")
+                text_widget.tag_configure("diff_del", background="#ffb3b3", foreground="black")
+                text_widget.tag_configure("diff_bg_add", background="#e6ffe6", foreground="black")
+                text_widget.tag_configure("diff_add", background="#b3ffb3", foreground="black")
+        else:
+            tk.Label(self.legend_frame, text=" 抄袭部分 (红底) ", bg="#ffcccc", fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
+            tk.Label(self.legend_frame, text=" 差异部分 (白底) ", bg="white", fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
+            
+            for text_widget in self.text_widgets:
+                text_widget.config(bg="white", fg="black")
+                text_widget.tag_configure("identical", background="#ffcccc", foreground="black")
+                # 差异部分恢复正常白底黑字，只用细微的浅灰背景辅助提示
+                text_widget.tag_configure("diff_bg_del", background="white", foreground="black")
+                text_widget.tag_configure("diff_del", background="#f0f0f0", foreground="black")
+                text_widget.tag_configure("diff_bg_add", background="white", foreground="black")
+                text_widget.tag_configure("diff_add", background="#f0f0f0", foreground="black")

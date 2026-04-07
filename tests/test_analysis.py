@@ -73,14 +73,17 @@ class TestAnalysis(unittest.TestCase):
 
     def test_normalization(self):
         """测试代码标准化功能是否正常工作。"""
-        # 标准化后的 original 和 similar 代码应该非常接近甚至相同
-        norm_orig = normalize_code(self.file_paths["original.py"])
-        norm_sim = normalize_code(self.file_paths["similar.py"])
-        # ast.unparse 的结果可能因版本而略有不同，但主体应一致
-        self.assertEqual(norm_orig, """def hello():
-    print('Hello, world!')""")
-        self.assertEqual(norm_sim, """def greeting():
-    print('Hello, world!')""")
+        # 测试常规模式 (保留变量名)
+        norm_orig_regular = normalize_code(self.file_paths["original.py"], advanced_mode=False)
+        norm_sim_regular = normalize_code(self.file_paths["similar.py"], advanced_mode=False)
+        self.assertEqual(norm_orig_regular, """def hello():\n    print('Hello, world!')""")
+        self.assertEqual(norm_sim_regular, """def greeting():\n    print('Hello, world!')""")
+
+        # 测试深度模式 (AST骨架)
+        norm_orig_advanced = normalize_code(self.file_paths["original.py"], advanced_mode=True)
+        norm_sim_advanced = normalize_code(self.file_paths["similar.py"], advanced_mode=True)
+        self.assertEqual(norm_orig_advanced, "Module FunctionDef arguments Expr Call Name Load Constant")
+        self.assertEqual(norm_sim_advanced, "Module FunctionDef arguments Expr Call Name Load Constant")
 
         # 对于有语法错误的文件，标准化应该能回退到正则模式，而不是直接崩溃
         norm_err = normalize_code(self.file_paths["error.py"])
@@ -92,8 +95,11 @@ class TestAnalysis(unittest.TestCase):
         all_files = list(self.file_paths.values())
         # 设置一个比较宽松的阈值，80%
         suspicious_pairs, errors = find_suspicious_pairs(all_files, 0.8)
-
         
+        # 1. 检查是否有文件读取错误
+        # 虽然 error.py 语法有误，但能通过正则后备策略解析，所以 errors 字典应该为空
+        self.assertEqual(len(errors), 0, "不应该有无法处理的文件")
+
         # 2. 检查返回的可疑文件对数量
         # 应该有3对可疑文件被找到:
         # (original, identical) -> 100%
