@@ -60,11 +60,14 @@ class PlagiarismCheckerApp(tk.Tk):
         self.ai_results_map = {}  # 存储AI评语映射
         self.exercise_text = ""  # 存储习题/作业要求
         self.api_key = tk.StringVar(value="") # 存储 Gemini API Key
+        self.api_base = tk.StringVar(value="") # 存储 API Base URL (用于支持 DeepSeek 等)
         self.api_proxy = tk.StringVar(value="") # 存储代理地址
         self.api_model = tk.StringVar(value="gemini-1.5-flash") # 存储 Gemini 模型名称
         self.local_model = tk.StringVar(value="qwen2.5-3b-instruct-q4_k_m.gguf") # 存储本地模型名称
         self.status_text = tk.StringVar(value="欢迎使用！请添加要检查的代码或文本文件。")  # 用于在状态栏显示信息
-        self.config_file = "config.yaml"
+        # 获取项目根目录，确保 config.yaml 始终保存在项目主目录下，避免因启动路径不同导致丢失
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.config_file = os.path.join(base_dir, "config.yaml")
         self.is_running = False  # 防止重复点击运行按钮的并发锁
         self.cancel_event = threading.Event() # 取消任务的全局标记锁
         self.load_config() # 启动时自动加载本地配置
@@ -112,6 +115,7 @@ class PlagiarismCheckerApp(tk.Tk):
                     config = yaml.safe_load(f)
                     if not config: config = {}
                     self.api_key.set(config.get('api_key', ''))
+                    self.api_base.set(config.get('api_base', ''))
                     self.api_proxy.set(config.get('api_proxy', ''))
                     self.api_model.set(config.get('api_model', 'gemini-1.5-flash'))
                     self.local_model.set(config.get('local_model', 'qwen2.5-3b-instruct-q4_k_m.gguf'))
@@ -123,6 +127,7 @@ class PlagiarismCheckerApp(tk.Tk):
         """将配置信息保存到本地文件"""
         config = {
             'api_key': self.api_key.get(),
+            'api_base': self.api_base.get(),
             'api_proxy': self.api_proxy.get(),
             'api_model': self.api_model.get(),
             'local_model': self.local_model.get(),
@@ -131,8 +136,8 @@ class PlagiarismCheckerApp(tk.Tk):
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"保存配置文件失败: {e}")
 
     def cancel_check(self):
         """响应用户点击停止按钮"""
@@ -362,6 +367,7 @@ class PlagiarismCheckerApp(tk.Tk):
                         exercise_text=self.exercise_text,
                         require_suggestions=self.require_suggestions.get(),
                         api_key=self.api_key.get().strip(),
+                    api_base=self.api_base.get().strip(),
                         api_model=self.api_model.get().strip(),
                         local_model=self.local_model.get().strip(),
                         api_proxy=self.api_proxy.get().strip(),

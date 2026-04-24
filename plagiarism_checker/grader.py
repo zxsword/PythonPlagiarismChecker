@@ -85,9 +85,9 @@ class AutoGrader:
 
     def _run_gemini(self):
         try:
-            from google import genai
+            import openai
         except ImportError:
-            self.result_cb("ALL", "-", self.grading_method, "缺少依赖库，请先卸载旧版并安装新版: pip install google-genai", "", True)
+            self.result_cb("ALL", "-", self.grading_method, "缺少依赖库，请在终端运行: pip install openai", "", True)
             for _ in self.files_to_check: self.progress_cb()
             return
 
@@ -105,13 +105,16 @@ class AutoGrader:
         model_name = self.api_model or 'gemini-1.5-flash'
         
         try:
-            client = genai.Client(api_key=self.api_key)
+            client_kwargs = {"api_key": self.api_key}
+            if self.api_base:
+                client_kwargs["base_url"] = self.api_base
+            client = openai.OpenAI(**client_kwargs)
         except Exception as e:
             self.result_cb("ALL", "-", self.grading_method, f"API初始化失败: {str(e)}", "", True)
             for _ in self.files_to_check: self.progress_cb()
             return
             
-        self.status_cb("正在连接 Gemini 云端模型...")
+        self.status_cb("正在连接云端大模型...")
 
         # 全局 API 请求排队锁，配合 last_req_time 严格控制发包速率
         api_lock = threading.Lock()
@@ -126,7 +129,7 @@ class AutoGrader:
             if self.cancel_event and self.cancel_event.is_set():
                 return
             file_name = os.path.basename(file_path)
-            self.status_cb(f"Gemini 正在批改: {file_name} | 预计剩余: {shared_eta[0]}")
+            self.status_cb(f"云端大模型正在批改: {file_name} | 预计剩余: {shared_eta[0]}")
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                     source_code = f.read()
@@ -163,17 +166,17 @@ class AutoGrader:
                                     return
                             last_req_time[0] = time.time()
 
-                        response = client.models.generate_content(
+                        response = client.chat.completions.create(
                             model=model_name,
-                            contents=prompt,
+                            messages=[{"role": "user", "content": prompt}]
                         )
-                        reply = response.text
+                        reply = response.choices[0].message.content
                         break
                     except Exception as api_e:
                         error_str = str(api_e)
-                        if 'limit: 0' in error_str:
-                            raise Exception("API拒绝访问(免费额度为0)。原因可能是：1. 该模型无免费额度(请在设置中换用以 flash 结尾的模型)；2. 代理节点失效。")
-                        if ('429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or '503' in error_str or 'UNAVAILABLE' in error_str) and attempt < max_retries - 1:
+                        if 'insufficient_quota' in error_str or 'limit: 0' in error_str:
+                            raise Exception("API拒绝访问(余额或限制不足)。请检查 API Key 状态，或代理节点是否失效。")
+                        if ('429' in error_str or 'RateLimit' in error_str or 'RESOURCE_EXHAUSTED' in error_str or '503' in error_str or 'UNAVAILABLE' in error_str) and attempt < max_retries - 1:
                             # 解析官方报错中明确给出的建议等待时间 (例如: "Please retry in 8.155s.")
                             wait_time = 20 * (attempt + 1)
                             delay_match = re.search(r'retry in (\d+(?:\.\d+)?)s', error_str)

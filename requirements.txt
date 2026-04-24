@@ -7,3 +7,4 @@ pyyaml>=6.0
 # AI 大模型相关依赖 (按需安装)
 google-genai>=0.3.0  # 用于连接 Google Gemini 云端大模型
 gpt4all>=2.8.2       # 用于本地离线运行 Qwen 等开源大模型
+openai>=2.32.0       # 用于连接其他云端大模型（如 GPT-5.5）

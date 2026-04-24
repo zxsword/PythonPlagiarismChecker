@@ -29,10 +29,13 @@ class ApiSettingsDialog(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
-        ttk.Label(self, text="请输入您的 Google Gemini API Key:").pack(pady=(15, 5))
+        ttk.Label(self, text="请输入您的 API Key:").pack(pady=(15, 5))
         ttk.Entry(self, textvariable=self.app.api_key, width=50, show="*").pack(pady=5)
         
-        ttk.Label(self, text="模型名称 (推荐使用全网最稳定的免费版: gemini-1.5-flash):").pack(pady=(10, 5))
+        ttk.Label(self, text="API Base URL (兼容OpenAI格式，如 DeepSeek 填 https://api.deepseek.com/v1):").pack(pady=(10, 5))
+        ttk.Entry(self, textvariable=self.app.api_base, width=50).pack(pady=5)
+
+        ttk.Label(self, text="模型名称 (例如 deepseek-chat 或 gemini-1.5-flash):").pack(pady=(10, 5))
         ttk.Entry(self, textvariable=self.app.api_model, width=50).pack(pady=5)
 
         ttk.Label(self, text="本地代理地址 (国内直连通常会失败，请填写科学上网代理)\n例如: http://127.0.0.1:7890 (留空则不使用代理):").pack(pady=(15, 5))
@@ -79,11 +82,20 @@ class ExerciseDialog(tk.Toplevel):
         
         ttk.Label(self, text="请分条填入本次作业的具体要求和评分细则（AI 将按此进行语义理解和严厉扣分）：\n例如：1. 必须使用 for 循环 (未用扣20分)；2. 变量命名必须见名知意 (乱写扣10分)", padding=10).pack(fill=tk.X)
         
-        self.text_widget = tk.Text(self, wrap=tk.WORD, font=("微软雅黑", 10), padx=10, pady=10)
-        self.text_widget.pack(fill=tk.BOTH, expand=True, padx=10)
-        self.text_widget.insert(tk.END, self.app.exercise_text)
+        # 优先把按钮停靠在底部，防止被中间会膨胀的文本框挤出边界
+        ttk.Button(self, text="保存并关闭", command=self.save_and_close).pack(side=tk.BOTTOM, pady=10)
         
-        ttk.Button(self, text="保存并关闭", command=self.save_and_close).pack(pady=10)
+        # 创建一个 Frame 容器来同时装下文本框和滚动条
+        text_frame = ttk.Frame(self)
+        text_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        
+        self.text_widget = tk.Text(text_frame, wrap=tk.WORD, font=("微软雅黑", 10), padx=10, pady=10)
+        scroll_y = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.text_widget.yview)
+        self.text_widget.config(yscrollcommand=scroll_y.set)
+        
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        self.text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.text_widget.insert(tk.END, self.app.exercise_text)
         
         self.wait_window(self)
 
@@ -252,13 +264,22 @@ class AiJudgementDialog(tk.Toplevel):
                 with model.chat_session():
                     reply = model.generate(prompt, max_tokens=1024, temp=0.3)
             else:
-                self.after(0, lambda: self.info_var.set("正在连接 Gemini 云端大模型进行深度分析..."))
-                from google import genai
+                self.after(0, lambda: self.info_var.set("正在连接云端大模型进行深度分析..."))
+                import openai
                 if not self.app.api_key.get(): raise Exception("未填写 API Key，请先在主界面【⚙️ AI设置】中配置。")
                 if self.app.api_proxy.get():
                     for p in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']: os.environ[p] = self.app.api_proxy.get()
-                client = genai.Client(api_key=self.app.api_key.get())
-                reply = client.models.generate_content(model=self.app.api_model.get() or 'gemini-1.5-flash', contents=prompt).text
+                
+                client_kwargs = {"api_key": self.app.api_key.get()}
+                if self.app.api_base.get().strip():
+                    client_kwargs["base_url"] = self.app.api_base.get().strip()
+                
+                client = openai.OpenAI(**client_kwargs)
+                response = client.chat.completions.create(
+                    model=self.app.api_model.get() or 'gemini-1.5-flash',
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                reply = response.choices[0].message.content
                 
             self.after(0, self._render_ui, reply)
         except Exception as e:
