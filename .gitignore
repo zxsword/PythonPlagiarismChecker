@@ -1,28 +1,7 @@
-# Python
+# 忽略包含敏感信息的真实配置文件
+config.yaml
+
+# 忽略常见的 Python 缓存和虚拟环境文件
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.egg-info/
-*.egg
-
-# Virtualenv
-.env
-.venv
 venv/
-ENV/
-env/
-env.bak/
-venv.bak/
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Testing
-temp_test_files/
+.env
