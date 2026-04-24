@@ -1,0 +1,5 @@
+api_key: AIzaSyBgd_-IRheXPLrrDsC55Jye9RXrIG_tRNQ
+api_proxy: http://127.0.0.1:9910
+api_model: gemini-2.5-flash
+local_model: gemma-3-4b-it-q4_k_m.gguf
+exercise_text: ''

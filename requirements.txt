@@ -1,4 +1,9 @@
-# 本项目仅使用了 Python 的内置标准库 (如 tkinter, ast, difflib, csv, threading 等)。
-# 因此，不需要通过 pip 安装任何第三方库。
-# 
-# 保持此文件存在是为了符合 Python 项目的通用最佳实践规范。
+# UI 与 核心逻辑 (标准库，无需安装，仅作说明)
+# tkinter, ast, difflib, concurrent.futures, multiprocessing
+
+# 配置文件读写支持 (替代内置的 json 以支持多行文本)
+pyyaml>=6.0
+
+# AI 大模型相关依赖 (按需安装)
+google-genai>=0.3.0  # 用于连接 Google Gemini 云端大模型
+gpt4all>=2.8.2       # 用于本地离线运行 Qwen 等开源大模型

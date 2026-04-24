@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import ttk
 import os
 import difflib
+from .dialogs import AiJudgementDialog
 
 class ComparisonWindow(tk.Toplevel):
     """
@@ -26,6 +27,7 @@ class ComparisonWindow(tk.Toplevel):
             original_path (str, optional): 疑似原创文件的路径。
         """
         super().__init__(parent)
+        self.app = parent
         self.title("多文件代码对比")
         self.geometry("1400x800")  # 设置窗口的默认大小为更宽，以适应多个文件
 
@@ -48,6 +50,9 @@ class ComparisonWindow(tk.Toplevel):
 
         self.legend_frame = ttk.Frame(top_bar)
         self.legend_frame.pack(side=tk.LEFT, fill=tk.X)
+        
+        self.ai_btn = ttk.Button(top_bar, text="🤖 一键 AI 深度审判", command=self.run_ai_judgement)
+        self.ai_btn.pack(side=tk.LEFT, padx=15)
 
         # --- 创建UI布局 ---
         # 主框架
@@ -192,6 +197,14 @@ class ComparisonWindow(tk.Toplevel):
             compare_lines = contents[i]
             seq_matcher = difflib.SequenceMatcher(None, baseline_lines, compare_lines)
 
+            # 【教学说明】强大的 difflib 底层比对
+            # get_opcodes() 会返回一组指令，告诉你要怎么做，才能把“基准文件”变成“对比文件”。
+            # 它返回的每个指令是一个元组：(操作类型, 基准起始行, 基准结束行, 对比起始行, 对比结束行)
+            # 操作类型有四种：
+            # 'equal'   : 两边一模一样（这就是疑似抄袭的部分）
+            # 'replace' : 这一段代码被替换成了别的样子
+            # 'delete'  : 基准文件里的这段代码，在对比文件里被删掉了
+            # 'insert'  : 对比文件在这里悄悄新增了一段代码
             for tag, i1, i2, j1, j2 in seq_matcher.get_opcodes():
                 if tag == 'equal':
                     # 标记相同代码（即抄袭部分），供切换主题使用
@@ -227,6 +240,10 @@ class ComparisonWindow(tk.Toplevel):
                         baseline_widget.tag_add("diff_del", f"{i1 + 1}.0", f"{i2 + 1}.0")
                     elif tag == 'insert':
                         text_widget.tag_add("diff_add", f"{j1 + 1}.0", f"{j2 + 1}.0")
+
+        # 锁定所有代码文本框，防止用户在对比窗口中意外修改代码导致错乱
+        for text_widget in self.text_widgets:
+            text_widget.config(state=tk.DISABLED)
 
         # 所有标签添加完毕后，应用默认主题渲染
         self.apply_theme()
@@ -265,3 +282,21 @@ class ComparisonWindow(tk.Toplevel):
                 text_widget.tag_configure("diff_del", background="#f0f0f0", foreground="black")
                 text_widget.tag_configure("diff_bg_add", background="white", foreground="black")
                 text_widget.tag_configure("diff_add", background="#f0f0f0", foreground="black")
+
+    def run_ai_judgement(self):
+        """提取基准代码和第一份对比代码，调用 AI 进行深度抄袭鉴定"""
+        if len(self.text_widgets) < 2:
+            return
+            
+        baseline_idx = 0
+        if self.original_path in self.file_paths:
+            baseline_idx = self.file_paths.index(self.original_path)
+            
+        compare_idx = 1 if baseline_idx == 0 else 0
+        
+        code_a = self.text_widgets[baseline_idx].get("1.0", tk.END).strip()
+        code_b = self.text_widgets[compare_idx].get("1.0", tk.END).strip()
+        name_a = os.path.basename(self.file_paths[baseline_idx])
+        name_b = os.path.basename(self.file_paths[compare_idx])
+        
+        AiJudgementDialog(self, self.app, code_a, code_b, name_a, name_b)

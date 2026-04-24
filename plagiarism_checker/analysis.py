@@ -12,6 +12,36 @@ import ast  # Abstract Syntax Tree, 用于将代码解析成语法树结构
 import re  # Regular Expressions, 用于文本的模式匹配（主要用于后备的标准化方法）
 import difflib  # 用于比较序列（比如文本行）的差异
 from itertools import combinations  # 用于生成所有可能的文件组合
+import concurrent.futures
+import multiprocessing
+
+# --- 用于进程池的全局变量和工作函数 (必须定义在顶层以支持序列化) ---
+_global_file_contents = {}
+
+# --- 预编译正则表达式以提升大规模查重时的性能 ---
+_RE_COMMENT = re.compile(r'#.*')
+_RE_DOC_DOUBLE = re.compile(r'""".*?"""', re.DOTALL)
+_RE_DOC_SINGLE = re.compile(r"'''.*?'''", re.DOTALL)
+_RE_BAD_COMMENT = re.compile(r'#[a-zA-Z0-9]')
+
+def _init_compare_worker(contents):
+    """初始化进程池的每个工作进程，将庞大的文件字典注入到全局内存，极大地优化 IPC 通信开销"""
+    global _global_file_contents
+    _global_file_contents = contents
+
+def _compare_worker(pair):
+    """在子进程中执行实际的查重比对任务"""
+    f1, f2 = pair
+    try:
+        sim = difflib.SequenceMatcher(None, _global_file_contents[f1], _global_file_contents[f2]).ratio()
+        return pair, sim
+    except Exception:
+        return pair, 0.0
+
+def _normalize_worker(args):
+    """在子进程中执行代码标准化解析"""
+    path, advanced_mode = args
+    return path, normalize_code(path, advanced_mode)
 
 def normalize_code(file_path, advanced_mode=False):
     """
@@ -62,24 +92,24 @@ def normalize_code(file_path, advanced_mode=False):
             extractor.visit(tree)
             # 以特殊分隔符拼接节点名称，这会形成一个代码的“骨架指纹”
             return " ".join(extractor.nodes)
-    except (SyntaxError, ValueError, TypeError):
-        # 如果代码有语法错误(SyntaxError)或其它解析问题，上面的代码会抛出异常
+    except Exception:
+        # 如果代码有语法错误或某些库不支持(如Python3.8缺少ast.unparse)，会抛出异常
         # 这时，我们切换到后备策略
         
         # 2. 后备策略：使用正则表达式进行清理
         try:
             # 移除单行注释 (从'#'到行尾)
-            code = re.sub(r'#.*', '', source_code)
+            code = _RE_COMMENT.sub('', source_code)
             # 移除三引号形式的文档字符串/多行注释 (非贪婪模式)
-            code = re.sub(r'""".*?"""', '', code, flags=re.DOTALL)
-            code = re.sub(r"'''.*?'''", '', code, flags=re.DOTALL)
+            code = _RE_DOC_DOUBLE.sub('', code)
+            code = _RE_DOC_SINGLE.sub('', code)
             # 将所有行合并，只保留那些剥离掉首尾空格后不为空的行
             return "\n".join(line for line in code.splitlines() if line.strip())
         except Exception:
             # 如果连后备策略都失败了，就彻底放弃
             return None
 
-def find_suspicious_pairs(files_to_check, threshold, advanced_mode=False):
+def find_suspicious_pairs(files_to_check, threshold, advanced_mode=False, progress_cb=None, cancel_event=None):
     """
     分析一系列文件，并找出相似度高于指定阈值的文件对。
 
@@ -99,34 +129,57 @@ def find_suspicious_pairs(files_to_check, threshold, advanced_mode=False):
     file_contents = {}
     errors = {}
 
-    # 第一步：为每个文件生成标准化的内容
-    for path in files_to_check:
-        normalized_code = normalize_code(path, advanced_mode)
-        if normalized_code is not None:
-            # 如果标准化成功，存入字典，键是文件路径，值是标准化后的代码
-            file_contents[path] = normalized_code
-        else:
-            # 如果失败，记录到错误字典中
-            errors[path] = "无法读取或处理此文件。"
+    # 第一步：并发执行代码标准化 (CPU密集型：AST解析)
+    norm_args = [(path, advanced_mode) for path in files_to_check]
+    pool = multiprocessing.Pool()
+    try:
+        total_norm = len(norm_args)
+        completed_norm = 0
+        for path, normalized_code in pool.imap_unordered(_normalize_worker, norm_args):
+            if cancel_event and cancel_event.is_set():
+                break
+            completed_norm += 1
+            if progress_cb: progress_cb(completed_norm, total_norm, "标准化")
+            if normalized_code is not None:
+                file_contents[path] = normalized_code
+            else:
+                errors[path] = "无法读取或处理此文件。"
+    finally:
+        # 无论正常结束还是被用户点击取消，都暴力终结所有子进程释放内存
+        pool.terminate()
+        pool.join()
+
+    if cancel_event and cancel_event.is_set():
+        return [], errors
 
     # 如果成功处理的文件少于2个，无法进行比较，直接返回
     if len(file_contents) < 2:
         return [], errors
 
     suspicious_pairs = []
-    # 第二步：生成所有可能的文件对组合
-    # 例如，如果有 [f1, f2, f3]，combinations会生成 (f1,f2), (f1,f3), (f2,f3)
-    for f1, f2 in combinations(file_contents.keys(), 2):
-        # 第三步：计算两个标准化代码的相似度
-        # difflib.SequenceMatcher是核心工具，用于比较两个序列的相似程度
-        # .ratio() 方法返回一个 0 到 1 之间的浮点数，代表相似度
-        similarity = difflib.SequenceMatcher(None, file_contents[f1], file_contents[f2]).ratio()
-        
-        # 第四步：如果相似度达到阈值，就记录下来
-        if similarity >= threshold:
-            suspicious_pairs.append(((f1, f2), similarity))
+    # 第二步：并发执行两两对比 (极其CPU密集型：difflib算法)
+    pairs = list(combinations(file_contents.keys(), 2))
+    # 动态计算 chunksize，减少进程间切换的损耗
+    chunk_size = max(1, len(pairs) // (multiprocessing.cpu_count() * 4))
 
-    # 第五步：将结果按相似度从高到低排序，方便查看
+    pool2 = multiprocessing.Pool(initializer=_init_compare_worker, initargs=(file_contents,))
+    try:
+        total_pairs = len(pairs)
+        completed_pairs = 0
+        for pair, similarity in pool2.imap_unordered(_compare_worker, pairs, chunksize=chunk_size):
+            if cancel_event and cancel_event.is_set():
+                break
+            completed_pairs += 1
+            # 每完成 1% 的进度更新一次UI，防止 UI 线程被高频挤死
+            if progress_cb and completed_pairs % max(1, total_pairs // 100) == 0:
+                progress_cb(completed_pairs, total_pairs, "比对")
+            if similarity >= threshold:
+                suspicious_pairs.append((pair, similarity))
+    finally:
+        pool2.terminate()
+        pool2.join()
+
+    # 按相似度从高到低排序，方便查看
     suspicious_pairs.sort(key=lambda x: x[1], reverse=True)
     
     return suspicious_pairs, errors
@@ -252,3 +305,154 @@ def detect_original_source(group_files):
     # 选出得分最高的
     best_file = max(scores, key=scores.get)
     return best_file, scores
+
+def evaluate_code_quality_ast(source_code):
+    """
+    针对初学者的代码规范和质量静态打分。
+    结合了纯文本规范正则检查 (PEP 8 基础) 与 AST 逻辑树检查。
+    """
+    score = 100
+    feedback = []
+    
+    # --- 1. 纯文本级别的格式检查 (关注初学者易犯的缩进/空格错误) ---
+    lines = source_code.split('\n')
+    format_penalty = 0
+    for i, line in enumerate(lines):
+        # 检查注释符后是否缺少空格 (例如 '#comment' 而不是 '# comment')
+        if _RE_BAD_COMMENT.search(line):
+            format_penalty += 1
+            if format_penalty <= 3:
+                feedback.append(f"- 扣1分: 第{i+1}行，注释符 '#' 后面应补充一个空格。")
+        # 检查行尾是否存在多余的无用空格
+        if line.rstrip() != line and line.strip() != '':
+            format_penalty += 1
+            if format_penalty <= 3:
+                feedback.append(f"- 扣1分: 第{i+1}行，代码末尾存在多余的空白字符。")
+                
+    if format_penalty > 0:
+        score -= min(format_penalty, 5) # 最多扣5分格式分
+
+    # --- 2. AST 语法树结构检查 ---
+    try:
+        tree = ast.parse(source_code)
+    except Exception as e:
+        # 更温和的报错：不直接给0分，而是给一个及格分(80分)但扣除20分
+        msg = getattr(e, 'msg', str(e))
+        lineno = getattr(e, 'lineno', '未知')
+        return 80, [f"- 严重错误 (-20分): 代码无法运行 ({msg}, 第{lineno}行)。请检查语法是否正确。"]
+
+    
+    # 1. 模块级注释
+    if not ast.get_docstring(tree):
+        score -= 5
+        feedback.append("- 扣5分: 缺少文件顶部模块说明注释 (Module Docstring)。")
+        
+    func_count = 0
+    class_count = 0
+    max_nesting_penalty = 0
+    naming_penalty = 0
+    doc_penalty = 0
+    bad_practice_penalty = 0
+    short_var_penalty = 0
+    wildcard_import_penalty = 0
+    empty_except_penalty = 0
+    
+    def get_nesting_depth(node):
+        max_depth = 0
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.If, ast.For, ast.While, ast.Try, ast.With)):
+                max_depth = max(max_depth, 1 + get_nesting_depth(child))
+            else:
+                max_depth = max(max_depth, get_nesting_depth(child))
+        return max_depth
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            class_count += 1
+            if not re.match(r'^[A-Z][a-zA-Z0-9]*$', node.name):
+                naming_penalty += 3
+                feedback.append(f"- 扣3分: 类名 '{node.name}' 不符合 CamelCase (大驼峰) 规范。")
+            if not ast.get_docstring(node):
+                doc_penalty += 3
+                feedback.append(f"- 扣3分: 类 '{node.name}' 缺少文档注释。")
+                
+        elif isinstance(node, ast.FunctionDef):
+            func_count += 1
+            if not re.match(r'^[a-z_][a-z0-9_]*$', node.name) and not node.name.startswith('__'):
+                naming_penalty += 3
+                feedback.append(f"- 扣3分: 函数名 '{node.name}' 不符合 snake_case (小写下划线) 规范。")
+            if not ast.get_docstring(node):
+                doc_penalty += 3
+                feedback.append(f"- 扣3分: 函数 '{node.name}' 缺少文档注释。")
+                
+            if hasattr(node, 'end_lineno') and hasattr(node, 'lineno'):
+                length = node.end_lineno - node.lineno
+                if length > 80:
+                    score -= 3
+                    feedback.append(f"- 扣3分: 函数 '{node.name}' 过长 ({length}行，超过80行)，建议适当拆分。")
+                    
+            arg_count = len(node.args.args)
+            if arg_count > 6:
+                score -= 3
+                feedback.append(f"- 扣3分: 函数 '{node.name}' 参数过多 ({arg_count}个)，建议合并参数。")
+                
+            # 检查可变默认参数 (Python 新手常踩的坑)
+            for default in node.args.defaults:
+                if isinstance(default, (ast.List, ast.Dict, ast.Set)):
+                    bad_practice_penalty += 5
+                    feedback.append(f"- 扣5分: 函数 '{node.name}' 使用了列表/字典作为默认参数，存在数据被意外共享的严重风险。")
+                
+            depth = get_nesting_depth(node)
+            if depth > 5:
+                max_nesting_penalty += 3
+                feedback.append(f"- 扣3分: 函数 '{node.name}' 控制流嵌套过深 (超过5层)，初学者建议梳理逻辑。")
+
+        elif isinstance(node, ast.ExceptHandler):
+            if node.type is None or (isinstance(node.type, ast.Name) and node.type.id == 'Exception'):
+                score -= 3
+                feedback.append("- 扣3分: 捕获了过于宽泛的异常 (except: 或 except Exception:)，容易掩盖真实的逻辑错误。")
+                
+            # 检查空的异常捕获 (except: pass)
+            if not node.body or (len(node.body) == 1 and isinstance(node.body[0], ast.Pass)):
+                empty_except_penalty += 3
+                feedback.append("- 扣3分: 出现了空的异常捕获块 (直接使用了 pass)，这会静默吞噬错误。")
+                
+        elif isinstance(node, ast.Global):
+            score -= 3
+            feedback.append(f"- 扣3分: 使用了 global 关键字声明全局变量 {node.names}，严重破坏了代码的封装性。")
+            
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in ('eval', 'exec'):
+                bad_practice_penalty += 10
+                feedback.append(f"- 扣10分: 代码使用了 '{node.func.id}()' 函数，存在任意代码执行的极度危险安全隐患。")
+                
+        elif isinstance(node, ast.ImportFrom):
+            if any(alias.name == '*' for alias in node.names):
+                wildcard_import_penalty += 3
+                feedback.append(f"- 扣3分: 使用了星号导入 'from {node.module} import *'，这会导致命名空间严重污染。")
+                
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            # 检查无意义的单字母变量 (排除常用于循环的标量名)
+            if len(node.id) == 1 and node.id not in ('i', 'j', 'k', 'x', 'y', 'z', 'a', 'b', 'c', 'n', '_', 'e', 'f'):
+                short_var_penalty += 1
+                if short_var_penalty <= 5: # 最多提示5次，防刷屏
+                    feedback.append(f"- 扣1分: 变量名 '{node.id}' 过于简短，缺乏表意性。")
+
+    # 应用扣分上限，防止某项扣太多
+    if naming_penalty > 0: score -= min(naming_penalty, 10)
+    if doc_penalty > 0: score -= min(doc_penalty, 15)
+    if max_nesting_penalty > 0: score -= min(max_nesting_penalty, 15)
+    if bad_practice_penalty > 0: score -= min(bad_practice_penalty, 20)
+    if short_var_penalty > 0: score -= min(short_var_penalty, 5)
+    if wildcard_import_penalty > 0: score -= min(wildcard_import_penalty, 6)
+    if empty_except_penalty > 0: score -= min(empty_except_penalty, 6)
+
+    if func_count == 0 and class_count == 0:
+        score -= 5
+        feedback.append("- 扣5分: 建议将代码逻辑封装到函数中，而不是全部写成全局脚本。")
+
+    score = max(0, score)
+    if score == 100:
+        feedback.append("非常棒！代码结构清晰，规范性很好，继续保持！")
+        
+    return score, feedback
