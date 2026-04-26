@@ -1,69 +1,66 @@
-# 🎓 Python 代码查重与 AI 自动批改系统 (Python Plagiarism Checker & Auto-Grader)
+# 🐍 Python 代码查重与 AI 自动批改系统
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![UI: Tkinter](https://img.shields.io/badge/GUI-Tkinter-lightgrey.svg)]()
-[![Local AI: GPT4All](https://img.shields.io/badge/Local%20AI-GPT4All-orange.svg)]()
+这是一个专为计算机编程教学设计的开源桌面工具，致力于帮助教师**高效排查学生作业抄袭**，并利用**大语言模型 (LLMs)** 实现作业的自动批改与代码审判。
 
-这是一个专为计算机科学教师、助教和培训机构打造的**桌面级教学辅助神器**。它采用 MVC 架构，底层由纯 Python 编写，融合了**传统 AST 图论算法**与**最前沿的大语言模型 (LLM)**，旨在解决编程作业批改中的两大痛点：**防作弊查重** 与 **自动化详尽代码审查**。
+纯AI写的。
 
-完全支持 **断网离线运行**，完美保护学生代码隐私！
+本项目采用严格的 MVC 架构设计，支持离线运行，并完美兼容市面上所有主流的云端大模型（如 DeepSeek、Kimi、Gemini 等）。
 
----
+## ✨ 核心特性
 
-## ✨ 核心杀手锏功能
+### 🔍 1. 深度代码查重 (Plagiarism Detection)
+- **双重分析引擎**：结合纯文本比对与 **AST (抽象语法树)** 节点提取，免疫单纯的“修改变量名”、“增删注释”等洗稿行为。
+- **图形化图论分组**：自动将互相抄袭的作业归聚为一个“犯罪团伙”，并推断出谁是真正的原创者。
+- **多文件高亮对比**：提供类似 VS Code 的多栏并排对比窗口，支持代码高亮与同步滚动。
 
-### 🔍 1. 企业级代码查重引擎 (Plagiarism Detection)
-* **无惧“洗稿”的深度 AST 模式**：不仅仅是文本比对，系统会将 Python 代码解析为抽象语法树 (AST)。即使学生**疯狂修改变量名、增删空行/注释、甚至调整无关函数的顺序**，也无法逃过 AST 骨架指纹的法眼。
-* **图论连通分组算法**：基于深度优先搜索 (DFS)，自动将“连环抄袭”的多名学生归为一组，并通过启发式算法（时间戳+代码体积）精准指出**谁是原创源头**。
-* **IDE 级并排对比窗口**：双击即可调出多文件高亮对比窗口。支持多文本框滚轮绝对同步，提供“专业模式”与“强提醒模式”双主题。
-* **🤖 一键 AI 深度审判**：查重抓到了还在狡辩“只是巧合”？在对比窗口中点击一键审判，系统会直接唤醒 AI，为你生成一份诸如“这两份代码在第10行有着完全一样且非标准的错误逻辑...”的**铁证级抄袭鉴定报告**。
+### 🤖 2. AI 智能批改 (Auto Grading)
+- **模型自由**：
+  - **本地离线模式**：基于 `gpt4all` 在本地运行 Qwen、Gemma 等开源大模型，保护学生隐私，支持 GPU 加速。
+  - **云端通用模式**：基于标准的 OpenAI API 格式接入云端大模型，支持填写 Base URL 实现 **DeepSeek** 等任意兼容模型的平滑切换。
+- **防超载并发锁**：内置严格的线程排队与限流算法，有效避免批量调用 API 时触发 `429 RateLimit` 限流错误。
+- **深度抄袭审判**：针对两份高度相似的代码，可一键唤醒 AI 进行深度鉴定，出具详细的“抄袭实锤报告”。
 
-### 📝 2. AI/AST 双核自动批改 (Auto-Grading)
-* **瞬时 AST 静态质量打分**：无需调用 AI，利用纯粹的 Python 内置库对代码质量进行极度严苛的扣分。精准打击初学者易犯的：不规范命名、超长嵌套、滥用 `global`/`eval`、可变默认参数等坏习惯。
-* **🚀 断网可用的本地大模型批改**：
-  * 接入 `gpt4all` 引擎，系统内置了对 **Qwen2.5-3B**、**Qwen2.5-7B** 以及 Google 最新 **Gemma-3-4B** 端侧神级模型的完美支持。
-  * 自动启用 **GPU 显存加速**，并智能回退 CPU。
-  * **支持任意外部模型导入**：网上的最新 `.gguf` 量化模型，一键导入立刻使用！
-* **☁️ Gemini 云端大模型批改**：支持接入 Google Gemini 官方 API，内置智能退避限流锁 (Token Bucket)，一口气丢进 500 份作业也绝不触发 429 并发报错崩溃。
-* **自定义评分细则**：支持将具体的“作业要求和给分点”填入设置中，AI 将严格遵循您的教鞭进行批改。
+###  3. 灵活的数据导出
+- 一键合并批量作业为单一文件。
+- 导出纯文本 CSV 表格或精美的 **HTML 可视化分析网页报告**。
 
-### 📊 3. 极致的体验与报告输出
-* **带 UI 响应的极速多进程/多线程并发**：无论是几千次的查重对比，还是几百次的网络请求，全部由底层并发池托管。主界面绝不卡顿，并附带秒级精准的 **ETA（预计剩余时间）** 和随时的 **[⏹ 取消任务]** 能力。
-* **生成精美 HTML 网页报告**：告别干瘪的 CSV。一键导出带统计图表卡片、红绿高亮分数警告、以及 Markdown 优雅排版的单文件 HTML 报告，发送给他人只需双击浏览器即可完美阅读。
-* **防风控“合并导出”功能**：在线平台限制上传文件数量？一键将上百份作业拼装成一个包含巨大醒目分隔符的 `.py` 文件。
+## 🚀 快速上手
 
----
+### 环境要求
+- Python 3.8 或更高版本
+- 推荐使用虚拟环境 (`venv` 或 `conda`)
 
-## 🚀 快速上手 (Installation)
+### 安装步骤
 
-### 方法一：源码运行（适合开发者）
-确保您的电脑上安装了 Python 3.8 或更高版本。
+1. **克隆项目到本地**
+   ```bash
+   git clone https://github.com/your-username/PythonPlagiarismChecker.git
+   cd PythonPlagiarismChecker
+   ```
 
-1. **克隆项目并安装依赖**
-```bash
-git clone https://github.com/yourusername/PythonPlagiarismChecker.git
-cd PythonPlagiarismChecker
-pip install -r requirements.txt
-```
+2. **安装依赖模块**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### 前提条件
-- 需要安装 Python 3.8 或更高版本。
+3. **配置初始化**
+   复制配置模板文件并重命名为 `config.yaml`（该文件已加入 `.gitignore` 以防止密钥泄露）：
+   ```bash
+   cp config.example.yaml config.yaml
+   ```
 
-### 运行步骤
-1. 下载或克隆本仓库到本地。
-2. 双击运行目录下的 `run.bat` 文件（仅限 Windows）。
-3. 或者在命令行/终端中运行以下命令：
+4. **启动应用**
    ```bash
    python main.py
    ```
 
-## 📂 项目结构
+## ⚙️ 模型配置指南
 
-- `main.py`：程序的启动入口。
-- `plagiarism_checker/`：核心代码包。
-  - `analysis.py`：查重算法核心（AST解析、差异比对、图论算法）。
-  - `ui/app.py`：主窗口界面实现。
-  - `ui/comparison_window.py`：代码对比高亮窗口实现。
-- `tests/`：单元测试目录。
-- `run.bat`：Windows 快速启动脚本。
+在软件主界面的【⚙️ AI设置】中，你可以自由配置：
+- **使用 DeepSeek**：API Base URL 填写 `https://api.deepseek.com/v1`，模型名称填写 `deepseek-chat`。
+- **使用 Kimi (Moonshot)**：API Base URL 填写 `https://api.moonshot.cn/v1`，模型名称填写 `moonshot-v1-8k`。
+- **使用 本地模型**：下载 `.gguf` 格式的开源模型，点击界面的导入按钮即可实现完全断网的离线批改。
+
+## 📄 开源协议
+
+本项目基于 MIT 协议开源。欢迎提交 Issue 和 Pull Request！

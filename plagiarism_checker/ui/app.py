@@ -15,10 +15,8 @@ from tkinter import filedialog, ttk
 import os
 import time
 import threading
-import csv
 import shutil
 from pathlib import Path
-import yaml
 # 使用相对路径从同一目录下的 `comparison_window` 模块导入 `ComparisonWindow` 类
 from .comparison_window import ComparisonWindow
 # 使用相对路径从父目录的 `analysis` 模块导入需要的函数
@@ -26,6 +24,9 @@ from ..analysis import find_suspicious_pairs, find_plagiarism_groups, detect_ori
 from ..grader import AutoGrader
 from .widgets import FileSelectionFrame, TaskOptionsFrame, ResultsFrame
 from .dialogs import ApiSettingsDialog, ExerciseDialog, AiReviewDialog, SourceCodeDialog
+from ..exporter import export_csv_report, export_html_report
+from ..config import ConfigManager
+from ..file_utils import merge_files
 
 class PlagiarismCheckerApp(tk.Tk):
     """
@@ -65,11 +66,11 @@ class PlagiarismCheckerApp(tk.Tk):
         self.api_model = tk.StringVar(value="gemini-1.5-flash") # 存储 Gemini 模型名称
         self.local_model = tk.StringVar(value="qwen2.5-3b-instruct-q4_k_m.gguf") # 存储本地模型名称
         self.status_text = tk.StringVar(value="欢迎使用！请添加要检查的代码或文本文件。")  # 用于在状态栏显示信息
-        # 获取项目根目录，确保 config.yaml 始终保存在项目主目录下，避免因启动路径不同导致丢失
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.config_file = os.path.join(base_dir, "config.yaml")
         self.is_running = False  # 防止重复点击运行按钮的并发锁
+        self.time_text = tk.StringVar(value="耗时: 00:00") # 存储耗时文字
+        self.start_time = 0.0 # 记录任务开始的时间戳
         self.cancel_event = threading.Event() # 取消任务的全局标记锁
+        self.config_manager = ConfigManager() # 实例化配置管理器
         self.load_config() # 启动时自动加载本地配置
         
         # 将需要在其他模块中引用的UI组件也在此处声明
@@ -86,6 +87,15 @@ class PlagiarismCheckerApp(tk.Tk):
 
         # --- 主布局 ---
         # 我们将UI划分为顶部控制区、中间结果区和底部状态栏
+        # ⚠️ 优先把固定在底部的组件 pack()，防止窗口缩小时被中间具有 expand=True 的控件挤出屏幕边界
+        status_frame = ttk.Frame(self, relief=tk.SUNKEN, padding=2)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        status_label = ttk.Label(status_frame, textvariable=self.status_text, padding=3)
+        status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        time_label = ttk.Label(status_frame, textvariable=self.time_text, padding=3, foreground="#555555")
+        time_label.pack(side=tk.RIGHT, padx=10)
+
         top_frame = ttk.Frame(self, padding="10")
         top_frame.pack(fill=tk.X)
 
@@ -93,9 +103,6 @@ class PlagiarismCheckerApp(tk.Tk):
         self.file_frame.pack(fill=tk.X)
         TaskOptionsFrame(top_frame, self).pack(fill=tk.X, pady=10)
         ResultsFrame(self, self).pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-
-        status_bar = ttk.Label(self, textvariable=self.status_text, relief=tk.SUNKEN, padding=5)
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
     def _init_menus(self):
         """初始化右键上下文菜单。"""
@@ -109,19 +116,13 @@ class PlagiarismCheckerApp(tk.Tk):
 
     def load_config(self):
         """从本地文件加载配置信息"""
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    config = yaml.safe_load(f)
-                    if not config: config = {}
-                    self.api_key.set(config.get('api_key', ''))
-                    self.api_base.set(config.get('api_base', ''))
-                    self.api_proxy.set(config.get('api_proxy', ''))
-                    self.api_model.set(config.get('api_model', 'gemini-1.5-flash'))
-                    self.local_model.set(config.get('local_model', 'qwen2.5-3b-instruct-q4_k_m.gguf'))
-                    self.exercise_text = config.get('exercise_text', '')
-            except Exception:
-                pass
+        config = self.config_manager.load()
+        self.api_key.set(config.get('api_key', ''))
+        self.api_base.set(config.get('api_base', ''))
+        self.api_proxy.set(config.get('api_proxy', ''))
+        self.api_model.set(config.get('api_model', 'gemini-1.5-flash'))
+        self.local_model.set(config.get('local_model', 'qwen2.5-3b-instruct-q4_k_m.gguf'))
+        self.exercise_text = config.get('exercise_text', '')
                 
     def save_config(self):
         """将配置信息保存到本地文件"""
@@ -133,11 +134,7 @@ class PlagiarismCheckerApp(tk.Tk):
             'local_model': self.local_model.get(),
             'exercise_text': self.exercise_text
         }
-        try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
-        except Exception as e:
-            print(f"保存配置文件失败: {e}")
+        self.config_manager.save(config)
 
     def cancel_check(self):
         """响应用户点击停止按钮"""
@@ -241,25 +238,8 @@ class PlagiarismCheckerApp(tk.Tk):
             return
 
         try:
-            with open(save_path, 'w', encoding='utf-8') as outfile:
-                outfile.write(f"# === 作业合并文件 ===\n# 共包含 {len(self.selected_files)} 份代码\n# 合并时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                
-                for file_path in self.selected_files:
-                    file_name = os.path.basename(file_path)
-                    
-                    # 构建巨大且醒目的分隔符（使用注释符号 #，保证合并后的文件不报语法红线）
-                    separator = "\n\n" + "#" * 80 + "\n"
-                    separator += f"#{' ' * 20}>>> 原始文件: {file_name} <<<\n"
-                    separator += "#" * 80 + "\n\n"
-                    
-                    outfile.write(separator)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='replace') as infile:
-                            outfile.write(infile.read())
-                    except Exception as e:
-                        outfile.write(f"# [读取失败]: {e}\n")
-                    
-            self.status_text.set(f"合并完成！已将 {len(self.selected_files)} 份作业合并保存至: {save_path}")
+            count = merge_files(self.selected_files, save_path)
+            self.status_text.set(f"合并完成！已将 {count} 份作业合并保存至: {save_path}")
         except Exception as e:
             self.status_text.set(f"合并导出失败: {str(e)}")
 
@@ -284,6 +264,14 @@ class PlagiarismCheckerApp(tk.Tk):
         if hasattr(self, 'ai_tree'):
             for i in self.ai_tree.get_children():
                 self.ai_tree.delete(i)
+                
+    def _update_timer(self):
+        """递归更新耗时秒表"""
+        if getattr(self, 'is_running', False):
+            elapsed = int(time.time() - self.start_time)
+            m, s = divmod(elapsed, 60)
+            self.time_text.set(f"耗时: {m:02d}:{s:02d}")
+            self.after(1000, self._update_timer)
 
     def run_check(self):
         """“开始运行”按钮的核心执行函数。"""
@@ -295,6 +283,9 @@ class PlagiarismCheckerApp(tk.Tk):
         self.cancel_event.clear()
         if hasattr(self, 'start_btn'): self.start_btn.config(state=tk.DISABLED)
         if hasattr(self, 'cancel_btn'): self.cancel_btn.config(state=tk.NORMAL)
+        self.start_time = time.time()
+        self.time_text.set("耗时: 00:00")
+        self._update_timer()  # 启动秒表
         self.clear_results()
         
         # 准备待检查的文件列表
@@ -332,6 +323,15 @@ class PlagiarismCheckerApp(tk.Tk):
         threshold_ratio = self.threshold.get() / 100.0
         is_advanced = self.advanced_mode.get()
         
+        # ⚠️ 修复严重隐患：必须在主线程提取所有 Tkinter 变量的值
+        # 否则在后台线程调用 .get() 会引发底层的 Tcl 解释器死锁，导致后台静默崩溃
+        req_sugg_val = self.require_suggestions.get()
+        key_val = self.api_key.get().strip()
+        base_val = self.api_base.get().strip()
+        model_val = self.api_model.get().strip()
+        local_val = self.local_model.get().strip()
+        proxy_val = self.api_proxy.get().strip()
+        
         def combined_task():
             try:
                 suspicious_pairs = []
@@ -349,28 +349,34 @@ class PlagiarismCheckerApp(tk.Tk):
 
                 # --- 2. 自动批改 ---
                 if run_grading and not self.cancel_event.is_set():
+                    graded_count = [0]  # 使用列表形式存储，以便在闭包函数内可修改
+                    total_files = len(files_to_check)
+                    
                     def status_cb(msg):
-                        self.after(0, lambda: self.status_text.set(msg))
+                        # 在底层传来的状态信息后面拼接具体进度数字
+                        self.after(0, self.status_text.set, f"{msg} ({graded_count[0]}/{total_files})")
                         
                     def progress_cb():
+                        graded_count[0] += 1
                         self.after(0, self.progress.step)
+                        self.after(0, self.status_text.set, f"当前批改进度... ({graded_count[0]}/{total_files})")
                         
                     def result_cb(file_path, score, method, status, review, is_error):
                         if file_path == "ALL":
-                            self.after(0, lambda: self._add_single_ai_result("", score, method, status, review, True, "系统环境错误"))
+                            self.after(0, self._add_single_ai_result, "", score, method, status, review, True, "系统环境错误")
                         else:
-                            self.after(0, lambda: self._add_single_ai_result(file_path, score, method, status, review, is_error))
+                            self.after(0, self._add_single_ai_result, file_path, score, method, status, review, is_error)
 
                     grader = AutoGrader(
                         grading_method=grading_method,
                         files_to_check=files_to_check,
                         exercise_text=self.exercise_text,
-                        require_suggestions=self.require_suggestions.get(),
-                        api_key=self.api_key.get().strip(),
-                    api_base=self.api_base.get().strip(),
-                        api_model=self.api_model.get().strip(),
-                        local_model=self.local_model.get().strip(),
-                        api_proxy=self.api_proxy.get().strip(),
+                        require_suggestions=req_sugg_val,
+                        api_key=key_val,
+                        api_base=base_val,
+                        api_model=model_val,
+                        local_model=local_val,
+                        api_proxy=proxy_val,
                         status_cb=status_cb,
                         progress_cb=progress_cb,
                         result_cb=result_cb,
@@ -383,7 +389,7 @@ class PlagiarismCheckerApp(tk.Tk):
                 
             except Exception as e:
                 # 防止后台线程“静默死亡”，把所有报错推到前台状态栏
-                self.after(0, lambda err=str(e): self.status_text.set(f"发生致命后台崩溃: {err}"))
+                self.after(0, self.status_text.set, f"发生致命后台崩溃: {str(e)}")
                 self.after(0, self.progress.stop)
                 self.after(0, self.progress.pack_forget)
                 self.is_running = False
@@ -458,84 +464,12 @@ class PlagiarismCheckerApp(tk.Tk):
             
         try:
             if file_path.endswith('.html'):
-                self._export_html_report(file_path, current_tab, tree_to_export)
+                export_html_report(file_path, current_tab, tree_to_export, self.ai_results_map)
             else:
-                self._export_csv_report(file_path, current_tab, tree_to_export)
+                export_csv_report(file_path, current_tab, tree_to_export, self.ai_results_map)
             self.status_text.set(f"报告已成功导出到: {file_path}")
         except Exception as e:
             self.status_text.set(f"导出报告失败: {str(e)}")
-
-    def _export_csv_report(self, file_path, current_tab, tree_to_export):
-        """内部方法：传统的纯文本 CSV 导出"""
-        with open(file_path, 'w', encoding='utf-8-sig', newline='') as f:
-            writer = csv.writer(f)
-            if current_tab == 0:
-                writer.writerow(["分组文件数", "最高相似度", "疑似原创文件", "所有成员"])
-                for item_id in tree_to_export.get_children():
-                    writer.writerow(tree_to_export.item(item_id)['values'])
-            else:
-                writer.writerow(["文件名", "评分", "评分模式", "批改状态", "详细评语"])
-                for item_id in tree_to_export.get_children():
-                    values = tree_to_export.item(item_id)['values']
-                    name, score, method, review = self.ai_results_map.get(item_id, ("", "-", "", ""))
-                    writer.writerow([name, score, method, values[2], review])
-
-    def _export_html_report(self, file_path, current_tab, tree_to_export):
-        """内部方法：生成带有 CSS 排版、顶栏统计卡片和高亮表格的精美单网页报告"""
-        html_content = [
-            "<!DOCTYPE html><html lang='zh-CN'><head><meta charset='UTF-8'><title>代码分析报告</title>",
-            "<style>",
-            "body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; color: #333; padding: 30px; margin: 0; }",
-            "h1 { text-align: center; color: #2c3e50; margin-bottom: 5px; }",
-            ".date { text-align: center; color: #7f8c8d; margin-bottom: 30px; font-size: 14px; }",
-            ".summary { display: flex; justify-content: center; gap: 20px; margin-bottom: 30px; }",
-            ".card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; min-width: 180px; }",
-            ".card h3 { margin: 0; font-size: 14px; color: #7f8c8d; text-transform: uppercase; }",
-            ".card p { margin: 10px 0 0; font-size: 32px; font-weight: bold; color: #2980b9; }",
-            "table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }",
-            "th, td { padding: 15px; text-align: left; border-bottom: 1px solid #eee; vertical-align: top; }",
-            "th { background-color: #2980b9; color: white; font-weight: 600; }",
-            "tr:hover { background-color: #f9f9f9; }",
-            ".review { background: #f1f8ff; border-left: 4px solid #3498db; padding: 15px; margin-top: 10px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; border-radius: 0 4px 4px 0; }",
-            "</style></head><body>"
-        ]
-        
-        title = "🔍 代码抄袭检测报告" if current_tab == 0 else "📝 AI 自动批改报告"
-        html_content.append(f"<h1>{title}</h1>")
-        html_content.append(f"<div class='date'>生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}</div>")
-        
-        html_content.append("<div class='summary'>")
-        if current_tab == 0:
-            items = tree_to_export.get_children()
-            is_zero = len(items) == 1 and str(tree_to_export.item(items[0])['values'][0]) == "-"
-            count = 0 if is_zero else len(items)
-            html_content.append(f"<div class='card'><h3>发现抄袭组数</h3><p>{count}</p></div>")
-        else:
-            scores = [int(self.ai_results_map[i][1]) for i in tree_to_export.get_children() if str(self.ai_results_map[i][1]).isdigit()]
-            avg = sum(scores)//len(scores) if scores else 0
-            html_content.append(f"<div class='card'><h3>批改文件总数</h3><p>{len(tree_to_export.get_children())}</p></div>")
-            html_content.append(f"<div class='card'><h3>班级平均分</h3><p>{avg}</p></div>")
-        html_content.append("</div>")
-        
-        html_content.append("<table>")
-        if current_tab == 0:
-            html_content.append("<tr><th>分组文件数</th><th>最高相似度</th><th>疑似原创文件</th><th>所有成员</th></tr>")
-            for item_id in tree_to_export.get_children():
-                v = tree_to_export.item(item_id)['values']
-                sim_val = str(v[1]).replace('%', '')
-                color = "color: #e74c3c; font-weight: bold;" if sim_val.replace('.', '', 1).isdigit() and float(sim_val) >= 90 else ""
-                html_content.append(f"<tr><td>{v[0]}</td><td style='{color}'>{v[1]}</td><td>{v[2]}</td><td>{v[3]}</td></tr>")
-        else:
-            html_content.append("<tr><th>文件名</th><th>评分</th><th>状态</th><th>详细评语</th></tr>")
-            for item_id in tree_to_export.get_children():
-                v = tree_to_export.item(item_id)['values']
-                name, score, method, review = self.ai_results_map.get(item_id, ("", "-", "", ""))
-                color = "color: #e74c3c; font-weight: bold;" if str(score).isdigit() and int(score) < 60 else ("color: #27ae60; font-weight: bold;" if str(score).isdigit() and int(score) >= 90 else "")
-                html_content.append(f"<tr><td width='15%'><b>{name}</b></td><td width='10%' style='{color}; font-size: 18px;'>{score}</td><td width='15%'>{v[2]}<br><small style='color:gray;'>{method}</small></td><td><div class='review'>{review}</div></td></tr>")
-        html_content.append("</table></body></html>")
-        
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write("\n".join(html_content))
 
     def show_ai_review(self):
         """弹出独立窗口查看选中的AI详细评语"""

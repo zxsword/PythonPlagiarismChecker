@@ -15,12 +15,13 @@ from .analysis import evaluate_code_quality_ast
 
 class AutoGrader:
     def __init__(self, grading_method, files_to_check, exercise_text, require_suggestions, 
-                 api_key, api_model, local_model, api_proxy, status_cb, progress_cb, result_cb, cancel_event=None):
+                 api_key, api_base, api_model, local_model, api_proxy, status_cb, progress_cb, result_cb, cancel_event=None):
         self.grading_method = grading_method
         self.files_to_check = files_to_check
         self.exercise_text = exercise_text
         self.require_suggestions = require_suggestions
         self.api_key = api_key
+        self.api_base = api_base
         self.api_model = api_model
         self.local_model = local_model
         self.api_proxy = api_proxy
@@ -84,31 +85,16 @@ class AutoGrader:
             executor.map(process_ast, self.files_to_check)
 
     def _run_gemini(self):
+        model_name = self.api_model or 'gemini-1.5-flash'
         try:
             import openai
+            from .ai_service import get_cloud_client
+            client = get_cloud_client(self.api_key, self.api_base, self.api_proxy)
         except ImportError:
             self.result_cb("ALL", "-", self.grading_method, "缺少依赖库，请在终端运行: pip install openai", "", True)
             for _ in self.files_to_check: self.progress_cb()
             return
 
-        if not self.api_key:
-            self.result_cb("ALL", "-", self.grading_method, "错误：未填写 API Key。请点击顶部【🔑 API设置】。", "", True)
-            for _ in self.files_to_check: self.progress_cb()
-            return
-
-        if self.api_proxy:
-            os.environ['http_proxy'] = self.api_proxy
-            os.environ['https_proxy'] = self.api_proxy
-            os.environ['HTTP_PROXY'] = self.api_proxy
-            os.environ['HTTPS_PROXY'] = self.api_proxy
-
-        model_name = self.api_model or 'gemini-1.5-flash'
-        
-        try:
-            client_kwargs = {"api_key": self.api_key}
-            if self.api_base:
-                client_kwargs["base_url"] = self.api_base
-            client = openai.OpenAI(**client_kwargs)
         except Exception as e:
             self.result_cb("ALL", "-", self.grading_method, f"API初始化失败: {str(e)}", "", True)
             for _ in self.files_to_check: self.progress_cb()
@@ -222,7 +208,8 @@ class AutoGrader:
 
     def _run_local_llm(self):
         try:
-            from gpt4all import GPT4All
+            import gpt4all
+            from .ai_service import load_local_model
             
             cache_dir = os.path.join(Path.home(), ".cache", "gpt4all")
             os.makedirs(cache_dir, exist_ok=True)
@@ -269,7 +256,7 @@ class AutoGrader:
                     return
                             
             self.status_cb("正在加载本地 AI 模型 (尝试启动 GPU 加速，已禁用后台联网)...")
-            model = GPT4All(model_name, model_path=cache_dir, allow_download=False, device='gpu')
+            model = load_local_model(model_name)
             
             # 获取底层库实际分配的硬件设备（如果 GPU 显存不足，这里可能会显示返回了 CPU）
             actual_device = getattr(model, 'device', '未知设备')

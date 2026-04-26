@@ -8,6 +8,7 @@
 
 import tkinter as tk
 from tkinter import ttk
+from tkinter import messagebox
 import threading
 import os
 from pathlib import Path
@@ -29,20 +30,30 @@ class ApiSettingsDialog(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
-        ttk.Label(self, text="请输入您的 API Key:").pack(pady=(15, 5))
-        ttk.Entry(self, textvariable=self.app.api_key, width=50, show="*").pack(pady=5)
+        # 优先创建底部按钮区并 pack(side=tk.BOTTOM)，防止由于窗口高度不够被挤压不可见
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=15)
+        ttk.Button(btn_frame, text="⚡ 测试云端模型连接", command=self.test_cloud_api).pack(side=tk.LEFT, padx=20)
+        ttk.Button(btn_frame, text="保存并关闭", command=self.save_and_close).pack(side=tk.RIGHT, padx=20)
+
+        # 中间可变内容的容器，使用 fill=BOTH 保证它只在剩余空间内伸缩
+        content_frame = ttk.Frame(self)
+        content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10)
+
+        ttk.Label(content_frame, text="请输入您的 API Key:").pack(pady=(15, 5))
+        ttk.Entry(content_frame, textvariable=self.app.api_key, width=50, show="*").pack(pady=5)
         
-        ttk.Label(self, text="API Base URL (兼容OpenAI格式，如 DeepSeek 填 https://api.deepseek.com/v1):").pack(pady=(10, 5))
-        ttk.Entry(self, textvariable=self.app.api_base, width=50).pack(pady=5)
+        ttk.Label(content_frame, text="API Base URL (兼容OpenAI格式，如 DeepSeek 填 https://api.deepseek.com/v1):").pack(pady=(10, 5))
+        ttk.Entry(content_frame, textvariable=self.app.api_base, width=50).pack(pady=5)
 
-        ttk.Label(self, text="模型名称 (例如 deepseek-chat 或 gemini-1.5-flash):").pack(pady=(10, 5))
-        ttk.Entry(self, textvariable=self.app.api_model, width=50).pack(pady=5)
+        ttk.Label(content_frame, text="模型名称 (例如 deepseek-chat 或 gemini-1.5-flash):").pack(pady=(10, 5))
+        ttk.Entry(content_frame, textvariable=self.app.api_model, width=50).pack(pady=5)
 
-        ttk.Label(self, text="本地代理地址 (国内直连通常会失败，请填写科学上网代理)\n例如: http://127.0.0.1:7890 (留空则不使用代理):").pack(pady=(15, 5))
-        ttk.Entry(self, textvariable=self.app.api_proxy, width=50).pack(pady=5)
+        ttk.Label(content_frame, text="本地代理地址 (国内直连通常会失败，请填写科学上网代理)\n例如: http://127.0.0.1:7890 (留空则不使用代理):").pack(pady=(15, 5))
+        ttk.Entry(content_frame, textvariable=self.app.api_proxy, width=50).pack(pady=5)
         
         # --- 新增：本地大模型设置 ---
-        local_frame = ttk.LabelFrame(self, text="本地大模型设置 (离线)", padding=10)
+        local_frame = ttk.LabelFrame(content_frame, text="本地大模型设置 (离线)", padding=10)
         local_frame.pack(fill=tk.X, padx=15, pady=(20, 5))
 
         ttk.Label(local_frame, text="选择或输入本地模型 (.gguf):").pack(anchor=tk.W)
@@ -57,11 +68,36 @@ class ApiSettingsDialog(tk.Toplevel):
         ]
         model_combo.pack(side=tk.LEFT)
         ttk.Button(combo_frame, text="📁 导入本地模型", command=self.app.import_local_model).pack(side=tk.RIGHT)
-
-        ttk.Button(self, text="保存并关闭", command=self.save_and_close).pack(pady=15)
         
         # 等待窗口关闭
         self.wait_window(self)
+
+    def test_cloud_api(self):
+        self.app.status_text.set("正在测试云端 API 连接，请稍候...")
+        
+        # ⚠️ 主线程提取变量
+        key_val = self.app.api_key.get()
+        base_val = self.app.api_base.get()
+        model_val = self.app.api_model.get()
+        proxy_val = self.app.api_proxy.get()
+        
+        def run_test():
+            try:
+                from ..ai_service import ask_cloud_llm
+                reply = ask_cloud_llm(
+                    prompt="你好，请回复'连接成功'这四个字。", 
+                    api_key=key_val, 
+                    api_base=base_val, 
+                    api_model=model_val, 
+                    api_proxy=proxy_val
+                )
+                self.after(0, lambda: messagebox.showinfo("测试成功", f"API 连接成功！\n\nAI 回复:\n{reply}", parent=self))
+                self.after(0, lambda: self.app.status_text.set("云端 API 测试成功。"))
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror("测试失败", f"API 连接或调用失败，请检查配置:\n\n{str(e)}", parent=self))
+                self.after(0, lambda: self.app.status_text.set("云端 API 测试失败。"))
+                
+        threading.Thread(target=run_test, daemon=True).start()
 
     def save_and_close(self):
         self.app.save_config()
@@ -241,6 +277,15 @@ class AiJudgementDialog(tk.Toplevel):
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         self.text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
+        # ⚠️ 修复严重隐患：必须在主线程提取所有 Tkinter 变量的值
+        # 否则在后台线程调用 .get() 会引发底层的 Tcl 解释器死锁，导致程序静默崩溃
+        self.grading_method_val = self.app.grading_method.get()
+        self.local_model_val = self.app.local_model.get()
+        self.api_key_val = self.app.api_key.get()
+        self.api_base_val = self.app.api_base.get()
+        self.api_model_val = self.app.api_model.get()
+        self.api_proxy_val = self.app.api_proxy.get()
+        
         threading.Thread(target=self._run_analysis, daemon=True).start()
         
     def _run_analysis(self):
@@ -254,32 +299,23 @@ class AiJudgementDialog(tk.Toplevel):
 【代码 A ({self.name_a})】：\n```python\n{self.code_a}\n```\n
 【代码 B ({self.name_b})】：\n```python\n{self.code_b}\n```"""
         try:
-            method = self.app.grading_method.get()
+            method = self.grading_method_val
             if "本地" in method:
                 self.after(0, lambda: self.info_var.set("正在加载本地大模型进行深度分析 (可能需要十几秒)..."))
-                from gpt4all import GPT4All
-                cache_dir = os.path.join(Path.home(), ".cache", "gpt4all")
-                model_name = self.app.local_model.get() or "qwen2.5-3b-instruct-q4_k_m.gguf"
-                model = GPT4All(model_name, model_path=cache_dir, allow_download=False, device='gpu')
+                from ..ai_service import load_local_model
+                model = load_local_model(self.local_model_val)
                 with model.chat_session():
                     reply = model.generate(prompt, max_tokens=1024, temp=0.3)
             else:
                 self.after(0, lambda: self.info_var.set("正在连接云端大模型进行深度分析..."))
-                import openai
-                if not self.app.api_key.get(): raise Exception("未填写 API Key，请先在主界面【⚙️ AI设置】中配置。")
-                if self.app.api_proxy.get():
-                    for p in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']: os.environ[p] = self.app.api_proxy.get()
-                
-                client_kwargs = {"api_key": self.app.api_key.get()}
-                if self.app.api_base.get().strip():
-                    client_kwargs["base_url"] = self.app.api_base.get().strip()
-                
-                client = openai.OpenAI(**client_kwargs)
-                response = client.chat.completions.create(
-                    model=self.app.api_model.get() or 'gemini-1.5-flash',
-                    messages=[{"role": "user", "content": prompt}]
+                from ..ai_service import ask_cloud_llm
+                reply = ask_cloud_llm(
+                    prompt=prompt, 
+                    api_key=self.api_key_val, 
+                    api_base=self.api_base_val, 
+                    api_model=self.api_model_val, 
+                    api_proxy=self.api_proxy_val
                 )
-                reply = response.choices[0].message.content
                 
             self.after(0, self._render_ui, reply)
         except Exception as e:
