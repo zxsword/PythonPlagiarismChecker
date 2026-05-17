@@ -1,8 +1,10 @@
-# 这是一个配置模板文件。
-# 第一次运行项目前，请将此文件复制并重命名为 config.yaml，然后填入你自己的真实配置。
-api_key: 'YOUR_API_KEY_HERE'
+# 非敏感配置模板（可安全提交到版本控制）
+# 使用方法：将此文件复制并重命名为 config.yaml
+#
+# ⚠️  API Key 和代理地址等敏感字段已移至 .env 文件管理
+#     请参考 .env.example 进行配置
+
 api_base: ''
-api_proxy: ''
 api_model: 'gemini-1.5-flash'
 local_model: 'qwen2.5-3b-instruct-q4_k_m.gguf'
 exercise_text: ''

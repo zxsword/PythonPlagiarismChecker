@@ -26,6 +26,7 @@ from .widgets import FileSelectionFrame, TaskOptionsFrame, ResultsFrame
 from .dialogs import ApiSettingsDialog, ExerciseDialog, AiReviewDialog, SourceCodeDialog
 from ..exporter import export_csv_report, export_html_report
 from ..config import ConfigManager
+from ..secrets import SecretsManager
 from ..file_utils import merge_files
 
 class PlagiarismCheckerApp(tk.Tk):
@@ -70,8 +71,9 @@ class PlagiarismCheckerApp(tk.Tk):
         self.time_text = tk.StringVar(value="耗时: 00:00") # 存储耗时文字
         self.start_time = 0.0 # 记录任务开始的时间戳
         self.cancel_event = threading.Event() # 取消任务的全局标记锁
-        self.config_manager = ConfigManager() # 实例化配置管理器
-        self.load_config() # 启动时自动加载本地配置
+        self.secrets_manager = SecretsManager()  # 优先初始化，load_config 会用到
+        self.config_manager = ConfigManager()
+        self.load_config()  # 启动时自动加载配置（含旧版自动迁移）
         
         # 将需要在其他模块中引用的UI组件也在此处声明
         self.file_listbox = None
@@ -115,26 +117,44 @@ class PlagiarismCheckerApp(tk.Tk):
         self.ai_menu.add_command(label="📄 查看原始源代码", command=self.show_source_code)
 
     def load_config(self):
-        """从本地文件加载配置信息"""
+        """从本地文件加载配置信息（含旧版敏感字段自动迁移）。"""
         config = self.config_manager.load()
-        self.api_key.set(config.get('api_key', ''))
+
+        # 检测并迁移旧 config.yaml 中遗留的 api_key/api_proxy
+        config, migrated = self.secrets_manager.migrate_from_config(config)
+        if migrated:
+            # 把已清理过的 config 写回，确保下次启动不再触发迁移
+            self.config_manager.save(config)
+            self.status_text.set(
+                "✅ 已自动将 API Key 迁移到 .env 文件（不会进 Git），config.yaml 已清理。"
+            )
+
+        # 非敏感字段从 config.yaml 读取
         self.api_base.set(config.get('api_base', ''))
-        self.api_proxy.set(config.get('api_proxy', ''))
         self.api_model.set(config.get('api_model', 'gemini-1.5-flash'))
         self.local_model.set(config.get('local_model', 'qwen2.5-3b-instruct-q4_k_m.gguf'))
         self.exercise_text = config.get('exercise_text', '')
-                
+
+        # 敏感字段从 .env / 系统环境变量读取
+        self.api_key.set(self.secrets_manager.get_api_key())
+        self.api_proxy.set(self.secrets_manager.get_api_proxy())
+
     def save_config(self):
-        """将配置信息保存到本地文件"""
+        """将非敏感配置保存到 config.yaml（api_key/api_proxy 不在此列）。"""
         config = {
-            'api_key': self.api_key.get(),
             'api_base': self.api_base.get(),
-            'api_proxy': self.api_proxy.get(),
             'api_model': self.api_model.get(),
             'local_model': self.local_model.get(),
-            'exercise_text': self.exercise_text
+            'exercise_text': self.exercise_text,
         }
         self.config_manager.save(config)
+
+    def save_secrets(self):
+        """将敏感字段（api_key、api_proxy）保存到 .env 文件。"""
+        self.secrets_manager.save(
+            api_key=self.api_key.get().strip(),
+            api_proxy=self.api_proxy.get().strip(),
+        )
 
     def cancel_check(self):
         """响应用户点击停止按钮"""

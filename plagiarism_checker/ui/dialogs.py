@@ -40,17 +40,27 @@ class ApiSettingsDialog(tk.Toplevel):
         content_frame = ttk.Frame(self)
         content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10)
 
-        ttk.Label(content_frame, text="请输入您的 API Key:").pack(pady=(15, 5))
-        ttk.Entry(content_frame, textvariable=self.app.api_key, width=50, show="*").pack(pady=5)
-        
-        ttk.Label(content_frame, text="API Base URL (兼容OpenAI格式，如 DeepSeek 填 https://api.deepseek.com/v1):").pack(pady=(10, 5))
-        ttk.Entry(content_frame, textvariable=self.app.api_base, width=50).pack(pady=5)
+        # 敏感字段提示（告诉用户这些内容不会进 Git）
+        secret_hint = ttk.Label(content_frame, text="🔒 以下字段保存到 .env 文件（已加入 .gitignore，不会进 Git）",
+                                foreground="#555555", font=("Helvetica", 8))
+        secret_hint.pack(pady=(15, 2))
 
-        ttk.Label(content_frame, text="模型名称 (例如 deepseek-chat 或 gemini-1.5-flash):").pack(pady=(10, 5))
-        ttk.Entry(content_frame, textvariable=self.app.api_model, width=50).pack(pady=5)
+        ttk.Label(content_frame, text="API Key:").pack(pady=(5, 2))
+        ttk.Entry(content_frame, textvariable=self.app.api_key, width=50, show="*").pack(pady=(0, 5))
 
-        ttk.Label(content_frame, text="本地代理地址 (国内直连通常会失败，请填写科学上网代理)\n例如: http://127.0.0.1:7890 (留空则不使用代理):").pack(pady=(15, 5))
-        ttk.Entry(content_frame, textvariable=self.app.api_proxy, width=50).pack(pady=5)
+        ttk.Label(content_frame, text="本地代理地址 (国内直连通常会失败，请填写科学上网代理)\n例如: http://127.0.0.1:7890 (留空则不使用代理):").pack(pady=(5, 2))
+        ttk.Entry(content_frame, textvariable=self.app.api_proxy, width=50).pack(pady=(0, 10))
+
+        # 分隔线
+        ttk.Separator(content_frame, orient='horizontal').pack(fill='x', pady=5)
+        ttk.Label(content_frame, text="📄 以下字段保存到 config.yaml（可提交到版本控制）",
+                  foreground="#555555", font=("Helvetica", 8)).pack(pady=(5, 2))
+
+        ttk.Label(content_frame, text="API Base URL (兼容OpenAI格式，如 DeepSeek 填 https://api.deepseek.com/v1):").pack(pady=(5, 2))
+        ttk.Entry(content_frame, textvariable=self.app.api_base, width=50).pack(pady=(0, 5))
+
+        ttk.Label(content_frame, text="模型名称 (例如 deepseek-chat 或 gemini-1.5-flash):").pack(pady=(5, 2))
+        ttk.Entry(content_frame, textvariable=self.app.api_model, width=50).pack(pady=(0, 5))
         
         # --- 新增：本地大模型设置 ---
         local_frame = ttk.LabelFrame(content_frame, text="本地大模型设置 (离线)", padding=10)
@@ -100,8 +110,9 @@ class ApiSettingsDialog(tk.Toplevel):
         threading.Thread(target=run_test, daemon=True).start()
 
     def save_and_close(self):
-        self.app.save_config()
-        self.app.status_text.set("API 配置已保存。")
+        self.app.save_secrets()  # api_key / api_proxy → .env
+        self.app.save_config()   # api_base / api_model 等 → config.yaml
+        self.app.status_text.set("AI 配置已保存（密钥写入 .env，不会进 Git）。")
         self.destroy()
 
 class ExerciseDialog(tk.Toplevel):

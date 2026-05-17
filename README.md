@@ -2,9 +2,7 @@
 
 这是一个专为计算机编程教学设计的开源桌面工具，致力于帮助教师**高效排查学生作业抄袭**，并利用**大语言模型 (LLMs)** 实现作业的自动批改与代码审判。
 
-纯AI写的。
-
-本项目采用严格的 MVC 架构设计，支持离线运行，并完美兼容市面上所有主流的云端大模型（如 DeepSeek、Kimi、Gemini 等）。
+本项目采用 MVC 架构设计，支持离线运行，兼容所有主流的云端大模型（DeepSeek、Kimi、Gemini 等）。
 
 ## ✨ 核心特性
 
@@ -53,6 +51,28 @@
    ```bash
    python main.py
    ```
+
+## 🔒 隐私与密钥
+
+API Key 等敏感信息**不会存入 config.yaml**，单独保存在项目根目录的 `.env` 文件中（`.env` 已加入 `.gitignore`，不会被提交到 Git）。
+
+有三种方式填入密钥（优先级由高到低）：
+
+1. **系统环境变量**（服务器 / CI 推荐）
+   ```bash
+   export PLAGIARISM_API_KEY=your-api-key-here
+   export PLAGIARISM_API_PROXY=http://127.0.0.1:7890  # 可选
+   ```
+
+2. **`.env` 文件**（日常使用推荐）
+   ```bash
+   cp .env.example .env   # 复制模板
+   # 然后用文本编辑器打开 .env 填入真实值
+   ```
+
+3. **软件界面的【⚙️ AI设置】**（图形界面）：点击保存后自动写入 `.env`。
+
+> 如果你的旧版 `config.yaml` 里还有 `api_key` 字段，程序启动时会自动将其迁移到 `.env` 并从 yaml 中删除，无需手动操作。
 
 ## ⚙️ 模型配置指南
 
