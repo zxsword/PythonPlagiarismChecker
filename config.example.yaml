@@ -4,7 +4,19 @@
 # ⚠️  API Key 和代理地址等敏感字段已移至 .env 文件管理
 #     请参考 .env.example 进行配置
 
+# --- AI 模型设置 ---
 api_base: ''
 api_model: 'gemini-1.5-flash'
 local_model: 'qwen2.5-3b-instruct-q4_k_m.gguf'
+
+# --- 作业/习题要求 ---
 exercise_text: ''
+
+# --- 查重与批改 UI 状态（程序关闭时自动保存，下次启动恢复） ---
+threshold: 85.0           # 相似度阈值（%）
+advanced_mode: false      # 深度查重模式（无视变量重命名）
+enable_plag: true         # 是否启用抄袭检测
+enable_grading: false     # 是否启用自动批改
+grading_method: 'AST 静态质量打分'
+require_suggestions: true # 是否要求 AI 给出修改建议
+selected_files: []        # 上次加载的文件列表（启动时自动恢复）

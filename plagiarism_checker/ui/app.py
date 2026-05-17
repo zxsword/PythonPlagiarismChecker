@@ -44,6 +44,8 @@ class PlagiarismCheckerApp(tk.Tk):
         self._init_data_vars()
         self._init_ui()
         self._init_menus()
+        # 关闭窗口时自动保存，而不是直接销毁
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _init_data_vars(self):
         """初始化所有用于存储程序状态的变量。"""
@@ -117,35 +119,54 @@ class PlagiarismCheckerApp(tk.Tk):
         self.ai_menu.add_command(label="📄 查看原始源代码", command=self.show_source_code)
 
     def load_config(self):
-        """从本地文件加载配置信息（含旧版敏感字段自动迁移）。"""
+        """从本地文件加载全部配置（含旧版敏感字段自动迁移）。"""
         config = self.config_manager.load()
 
         # 检测并迁移旧 config.yaml 中遗留的 api_key/api_proxy
         config, migrated = self.secrets_manager.migrate_from_config(config)
         if migrated:
-            # 把已清理过的 config 写回，确保下次启动不再触发迁移
             self.config_manager.save(config)
             self.status_text.set(
                 "✅ 已自动将 API Key 迁移到 .env 文件（不会进 Git），config.yaml 已清理。"
             )
 
-        # 非敏感字段从 config.yaml 读取
+        # --- 非敏感字段从 config.yaml 读取 ---
         self.api_base.set(config.get('api_base', ''))
         self.api_model.set(config.get('api_model', 'gemini-1.5-flash'))
         self.local_model.set(config.get('local_model', 'qwen2.5-3b-instruct-q4_k_m.gguf'))
         self.exercise_text = config.get('exercise_text', '')
 
-        # 敏感字段从 .env / 系统环境变量读取
+        # UI 状态（阈值、开关、批改方式等）
+        self.threshold.set(config.get('threshold', 85.0))
+        self.advanced_mode.set(config.get('advanced_mode', False))
+        self.enable_plag.set(config.get('enable_plag', True))
+        self.enable_grading.set(config.get('enable_grading', False))
+        self.grading_method.set(config.get('grading_method', 'AST 静态质量打分'))
+        self.require_suggestions.set(config.get('require_suggestions', True))
+
+        # 文件列表：只恢复磁盘上仍然存在的文件，丢失的静默剔除
+        saved_files = config.get('selected_files', [])
+        if isinstance(saved_files, list):
+            self.selected_files = [f for f in saved_files if os.path.isfile(f)]
+
+        # --- 敏感字段从 .env / 系统环境变量读取 ---
         self.api_key.set(self.secrets_manager.get_api_key())
         self.api_proxy.set(self.secrets_manager.get_api_proxy())
 
     def save_config(self):
-        """将非敏感配置保存到 config.yaml（api_key/api_proxy 不在此列）。"""
+        """将非敏感配置保存到 config.yaml。"""
         config = {
             'api_base': self.api_base.get(),
             'api_model': self.api_model.get(),
             'local_model': self.local_model.get(),
             'exercise_text': self.exercise_text,
+            'threshold': self.threshold.get(),
+            'advanced_mode': bool(self.advanced_mode.get()),
+            'enable_plag': bool(self.enable_plag.get()),
+            'enable_grading': bool(self.enable_grading.get()),
+            'grading_method': self.grading_method.get(),
+            'require_suggestions': bool(self.require_suggestions.get()),
+            'selected_files': self.selected_files,
         }
         self.config_manager.save(config)
 
@@ -155,6 +176,12 @@ class PlagiarismCheckerApp(tk.Tk):
             api_key=self.api_key.get().strip(),
             api_proxy=self.api_proxy.get().strip(),
         )
+
+    def _on_close(self):
+        """关闭主窗口时自动保存配置，再销毁窗口。"""
+        self.save_config()
+        self.save_secrets()
+        self.destroy()
 
     def cancel_check(self):
         """响应用户点击停止按钮"""
