@@ -11,6 +11,8 @@ from tkinter import ttk
 import os
 import difflib
 from .dialogs import AiJudgementDialog
+from .theme import PROFESSIONAL_THEME as PRO, PLAG_THEME as PLAG
+from .window_utils import center_window
 
 class ComparisonWindow(tk.Toplevel):
     """
@@ -104,13 +106,16 @@ class ComparisonWindow(tk.Toplevel):
             frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
 
             # 行号文本框
-            line_widget = tk.Text(frame, width=4, padx=3, takefocus=0, border=0, background="#f0f0f0", state=tk.DISABLED, font=("Courier New", 10), wrap=tk.NONE)
+            line_widget = tk.Text(frame, width=4, padx=3, takefocus=0, border=0, background=PRO['line_number_bg'], state=tk.DISABLED, font=("Courier New", 10), wrap=tk.NONE)
             line_widget.pack(side=tk.LEFT, fill=tk.Y)
             self.line_widgets.append(line_widget)
 
             # 文本框 (清理了上一次修改导致的重复代码)
             # 修改了 bg (背景色) 和 fg (前景色)，让相同代码默认呈现柔和的灰色
-            text_widget = tk.Text(frame, wrap=tk.NONE, font=("Courier New", 10), width=text_width, bg="#f8f8f8", fg="#7a7a7a", selectbackground="#0078D7", selectforeground="white", exportselection=False)
+            text_widget = tk.Text(frame, wrap=tk.NONE, font=("Courier New", 10), width=text_width,
+                                  bg=PRO['code_bg'], fg=PRO['code_muted'],
+                                  selectbackground=PRO['select_bg'], selectforeground=PRO['select_fg'],
+                                  exportselection=False)
             self.text_widgets.append(text_widget)
 
             # 滚动条
@@ -141,6 +146,9 @@ class ComparisonWindow(tk.Toplevel):
 
         # --- 加载文件内容并高亮 ---
         self.load_and_highlight()
+
+        # 居中到父窗口（必须在所有控件 pack 完成后调用）
+        center_window(self)
 
     def on_scroll(self, event):
         """处理鼠标滚轮事件，实现所有文本框的同步滚动。"""
@@ -260,29 +268,29 @@ class ComparisonWindow(tk.Toplevel):
         ttk.Label(self.legend_frame, text="图例说明:").pack(side=tk.LEFT, padx=(0, 10))
         
         if theme == "专业模式 (弱化相同)":
-            tk.Label(self.legend_frame, text=" 相同代码 (灰色文字) ", bg="#f8f8f8", fg="#7a7a7a", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
-            tk.Label(self.legend_frame, text=" 基准文件修改 ", bg="#ffe6e6", fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
-            tk.Label(self.legend_frame, text=" 疑似文件修改 ", bg="#e6ffe6", fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
-            
+            tk.Label(self.legend_frame, text=" 相同代码 (灰色文字) ", bg=PRO['code_bg'], fg=PRO['code_muted'], borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
+            tk.Label(self.legend_frame, text=" 基准文件修改 ", bg=PLAG['basis_diff_bg'], fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
+            tk.Label(self.legend_frame, text=" 疑似文件修改 ", bg=PLAG['sus_diff_bg'], fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
+
             for text_widget in self.text_widgets:
-                text_widget.config(bg="#f8f8f8", fg="#7a7a7a")
-                text_widget.tag_configure("identical", background="#f8f8f8", foreground="#7a7a7a")
-                text_widget.tag_configure("diff_bg_del", background="#ffe6e6", foreground="black")
-                text_widget.tag_configure("diff_del", background="#ffb3b3", foreground="black")
-                text_widget.tag_configure("diff_bg_add", background="#e6ffe6", foreground="black")
-                text_widget.tag_configure("diff_add", background="#b3ffb3", foreground="black")
+                text_widget.config(bg=PRO['code_bg'], fg=PRO['code_muted'])
+                text_widget.tag_configure("identical", background=PRO['code_bg'], foreground=PRO['code_muted'])
+                text_widget.tag_configure("diff_bg_del", background=PLAG['basis_diff_bg'], foreground="black")
+                text_widget.tag_configure("diff_del", background=PLAG['basis_diff_hl'], foreground="black")
+                text_widget.tag_configure("diff_bg_add", background=PLAG['sus_diff_bg'], foreground="black")
+                text_widget.tag_configure("diff_add", background=PLAG['sus_diff_hl'], foreground="black")
         else:
-            tk.Label(self.legend_frame, text=" 抄袭部分 (红底) ", bg="#ffcccc", fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
+            tk.Label(self.legend_frame, text=" 抄袭部分 (红底) ", bg=PLAG['plag_same_bg'], fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
             tk.Label(self.legend_frame, text=" 差异部分 (白底) ", bg="white", fg="black", borderwidth=1, relief="solid").pack(side=tk.LEFT, padx=5)
-            
+
             for text_widget in self.text_widgets:
                 text_widget.config(bg="white", fg="black")
-                text_widget.tag_configure("identical", background="#ffcccc", foreground="black")
+                text_widget.tag_configure("identical", background=PLAG['plag_same_bg'], foreground="black")
                 # 差异部分恢复正常白底黑字，只用细微的浅灰背景辅助提示
                 text_widget.tag_configure("diff_bg_del", background="white", foreground="black")
-                text_widget.tag_configure("diff_del", background="#f0f0f0", foreground="black")
+                text_widget.tag_configure("diff_del", background=PLAG['plag_diff_hint'], foreground="black")
                 text_widget.tag_configure("diff_bg_add", background="white", foreground="black")
-                text_widget.tag_configure("diff_add", background="#f0f0f0", foreground="black")
+                text_widget.tag_configure("diff_add", background=PLAG['plag_diff_hint'], foreground="black")
 
     def run_ai_judgement(self):
         """提取基准代码和第一份对比代码，调用 AI 进行深度抄袭鉴定"""

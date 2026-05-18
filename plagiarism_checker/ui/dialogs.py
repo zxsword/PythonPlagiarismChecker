@@ -12,6 +12,8 @@ from tkinter import messagebox
 import threading
 import os
 from pathlib import Path
+from .theme import PROFESSIONAL_THEME as PRO
+from .window_utils import center_window
 
 class ApiSettingsDialog(tk.Toplevel):
     """配置云端 AI (Gemini API) 的对话框"""
@@ -42,7 +44,7 @@ class ApiSettingsDialog(tk.Toplevel):
 
         # 敏感字段提示（告诉用户这些内容不会进 Git）
         secret_hint = ttk.Label(content_frame, text="🔒 以下字段保存到 .env 文件（已加入 .gitignore，不会进 Git）",
-                                foreground="#555555", font=("Helvetica", 8))
+                                foreground=PRO['text_secondary'], font=("Helvetica", 8))
         secret_hint.pack(pady=(15, 2))
 
         ttk.Label(content_frame, text="API Key:").pack(pady=(5, 2))
@@ -54,7 +56,7 @@ class ApiSettingsDialog(tk.Toplevel):
         # 分隔线
         ttk.Separator(content_frame, orient='horizontal').pack(fill='x', pady=5)
         ttk.Label(content_frame, text="📄 以下字段保存到 config.yaml（可提交到版本控制）",
-                  foreground="#555555", font=("Helvetica", 8)).pack(pady=(5, 2))
+                  foreground=PRO['text_secondary'], font=("Helvetica", 8)).pack(pady=(5, 2))
 
         ttk.Label(content_frame, text="API Base URL (兼容OpenAI格式，如 DeepSeek 填 https://api.deepseek.com/v1):").pack(pady=(5, 2))
         ttk.Entry(content_frame, textvariable=self.app.api_base, width=50).pack(pady=(0, 5))
@@ -78,8 +80,9 @@ class ApiSettingsDialog(tk.Toplevel):
         ]
         model_combo.pack(side=tk.LEFT)
         ttk.Button(combo_frame, text="📁 导入本地模型", command=self.app.import_local_model).pack(side=tk.RIGHT)
-        
-        # 等待窗口关闭
+
+        # 居中显示后再等待
+        center_window(self)
         self.wait_window(self)
 
     def test_cloud_api(self):
@@ -143,7 +146,8 @@ class ExerciseDialog(tk.Toplevel):
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         self.text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.text_widget.insert(tk.END, self.app.exercise_text)
-        
+
+        center_window(self)
         self.wait_window(self)
 
     def save_and_close(self):
@@ -167,10 +171,10 @@ class AiReviewDialog(tk.Toplevel):
         code_frame = ttk.LabelFrame(paned, text="源代码")
         
         # 增加独立的行号文本框
-        line_widget = tk.Text(code_frame, width=5, padx=3, takefocus=0, border=0, background="#f0f0f0", state=tk.NORMAL, font=("Courier New", 11), wrap=tk.NONE)
+        line_widget = tk.Text(code_frame, width=5, padx=3, takefocus=0, border=0, background=PRO['line_number_bg'], state=tk.NORMAL, font=("Courier New", 11), wrap=tk.NONE)
         line_widget.pack(side=tk.LEFT, fill=tk.Y)
-        
-        code_text = tk.Text(code_frame, wrap=tk.NONE, font=("Courier New", 11), bg="#f8f8f8")
+
+        code_text = tk.Text(code_frame, wrap=tk.NONE, font=("Courier New", 11), bg=PRO['code_bg'])
         
         # 同步滚动机制
         code_scroll_y = ttk.Scrollbar(code_frame, orient=tk.VERTICAL)
@@ -216,7 +220,7 @@ class AiReviewDialog(tk.Toplevel):
         
         # 右侧：评语区
         review_frame = ttk.LabelFrame(paned, text="详细评语")
-        review_text = tk.Text(review_frame, wrap=tk.WORD, font=("微软雅黑", 11), bg="#ffffff")
+        review_text = tk.Text(review_frame, wrap=tk.WORD, font=("微软雅黑", 11), bg=PRO['paper_bg'])
         review_scroll_y = ttk.Scrollbar(review_frame, orient=tk.VERTICAL, command=review_text.yview)
         review_text.config(yscrollcommand=review_scroll_y.set)
         review_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
@@ -231,6 +235,8 @@ class AiReviewDialog(tk.Toplevel):
         review_text.config(state=tk.DISABLED)
         paned.add(review_frame, weight=1)
 
+        center_window(self)
+
 class SourceCodeDialog(tk.Toplevel):
     """快速查看原始源代码的独立窗口"""
     def __init__(self, parent, name, code):
@@ -241,7 +247,7 @@ class SourceCodeDialog(tk.Toplevel):
         frame = ttk.Frame(self)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        text_widget = tk.Text(frame, wrap=tk.NONE, font=("Courier New", 11), bg="#fdfdfd", padx=10, pady=10)
+        text_widget = tk.Text(frame, wrap=tk.NONE, font=("Courier New", 11), bg=PRO['panel_bg'], padx=10, pady=10)
         scroll_y = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=text_widget.yview)
         scroll_x = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=text_widget.xview)
         text_widget.config(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
@@ -252,6 +258,8 @@ class SourceCodeDialog(tk.Toplevel):
         
         text_widget.insert(tk.END, code)
         text_widget.config(state=tk.DISABLED)
+
+        center_window(self)
 
 class AiJudgementDialog(tk.Toplevel):
     """AI 深度审判窗口：分析两份代码的具体抄袭手段"""
@@ -281,7 +289,7 @@ class AiJudgementDialog(tk.Toplevel):
         text_frame = ttk.Frame(self)
         text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
         
-        self.text_widget = tk.Text(text_frame, wrap=tk.WORD, font=("微软雅黑", 11), bg="#fdfdfd")
+        self.text_widget = tk.Text(text_frame, wrap=tk.WORD, font=("微软雅黑", 11), bg=PRO['panel_bg'])
         scroll_y = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.text_widget.yview)
         self.text_widget.config(yscrollcommand=scroll_y.set)
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
@@ -296,8 +304,10 @@ class AiJudgementDialog(tk.Toplevel):
         self.api_model_val = self.app.api_model.get()
         self.api_proxy_val = self.app.api_proxy.get()
         
+        center_window(self)
+
         threading.Thread(target=self._run_analysis, daemon=True).start()
-        
+
     def _run_analysis(self):
         from ..prompts import build_judgement_prompt
         prompt = build_judgement_prompt(self.code_a, self.code_b, self.name_a, self.name_b)

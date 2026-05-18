@@ -15,6 +15,7 @@ UI 组件模块
 
 import tkinter as tk
 from tkinter import ttk
+from .theme import PROFESSIONAL_THEME as PRO
 
 class FileSelectionFrame(ttk.LabelFrame):
     """文件选择UI面板"""
@@ -93,7 +94,7 @@ class ResultsFrame(ttk.LabelFrame):
         style = ttk.Style()
         style.configure("Treeview", rowheight=30, font=("Helvetica", 9))
         style.configure("Treeview.Heading", font=("Helvetica", 9))
-        style.map('Treeview', background=[('selected', '#0078D7')], foreground=[('selected', 'white')])
+        style.map('Treeview', background=[('selected', PRO['select_bg'])], foreground=[('selected', PRO['select_fg'])])
 
     def _setup_notebook(self):
         self.notebook = ttk.Notebook(self)
@@ -109,9 +110,9 @@ class ResultsFrame(ttk.LabelFrame):
         for col in tree_cols:
             self.result_tree.heading(col, text=col)
 
-        self.result_tree.tag_configure('oddrow', background='#f9f9f9')
-        self.result_tree.tag_configure('evenrow', background='#ffffff')
-        self.result_tree.tag_configure('high_risk', foreground='#d32f2f')
+        self.result_tree.tag_configure('oddrow', background=PRO['row_alt_bg'])
+        self.result_tree.tag_configure('evenrow', background=PRO['paper_bg'])
+        self.result_tree.tag_configure('high_risk', foreground=PRO['error_fg'])
 
         self.result_tree.column("分组文件数", width=80, anchor=tk.CENTER)
         self.result_tree.column("最高相似度", width=80, anchor=tk.CENTER)
@@ -140,10 +141,10 @@ class ResultsFrame(ttk.LabelFrame):
         self.ai_tree.column("评分", width=60, anchor=tk.CENTER)
         self.ai_tree.column("批改状态", width=450, anchor=tk.W)
 
-        self.ai_tree.tag_configure('oddrow', background='#f9f9f9')
-        self.ai_tree.tag_configure('evenrow', background='#ffffff')
-        self.ai_tree.tag_configure('error', foreground='#d32f2f')
-        self.ai_tree.tag_configure('success', foreground='#2e7d32')
+        self.ai_tree.tag_configure('oddrow', background=PRO['row_alt_bg'])
+        self.ai_tree.tag_configure('evenrow', background=PRO['paper_bg'])
+        self.ai_tree.tag_configure('error', foreground=PRO['error_fg'])
+        self.ai_tree.tag_configure('success', foreground=PRO['success_fg'])
 
         ai_scrollbar = ttk.Scrollbar(self.tab_ai, orient=tk.VERTICAL, command=self.ai_tree.yview)
         self.ai_tree.config(yscrollcommand=ai_scrollbar.set)
