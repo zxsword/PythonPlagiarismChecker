@@ -47,8 +47,22 @@ def ask_cloud_llm(prompt, api_key, api_base="", api_model="gemini-1.5-flash", ap
     return response.choices[0].message.content
 
 def load_local_model(model_name=None):
-    """统一的本地 GPT4All 模型加载器。"""
+    """
+    统一的本地 GPT4All 模型加载器。
+    优先尝试 GPU 加速，若 GPU 不可用自动退回 CPU，并打印实际运行设备。
+    """
     from gpt4all import GPT4All
-    # 设置模型下载和读取的专属缓存目录，放在用户主目录下的 .cache 文件夹，防止污染我们自己的项目代码文件夹
     cache_dir = os.path.join(Path.home(), ".cache", "gpt4all")
-    return GPT4All(model_name or "qwen2.5-3b-instruct-q4_k_m.gguf", model_path=cache_dir, allow_download=False, device='gpu')
+    name = model_name or "qwen2.5-3b-instruct-q4_k_m.gguf"
+
+    try:
+        model = GPT4All(name, model_path=cache_dir, allow_download=False, device='gpu')
+        actual_device = getattr(model, 'device', 'gpu')
+        print(f"[本地模型] 已加载，运行在: {actual_device}")
+        return model
+    except Exception as gpu_err:
+        # GPU 不可用（无 CUDA / 显存不足），退回 CPU
+        print(f"[本地模型] GPU 加载失败 ({gpu_err})，切换到 CPU 运行。")
+        model = GPT4All(name, model_path=cache_dir, allow_download=False, device='cpu')
+        print("[本地模型] 已加载，运行在: CPU")
+        return model

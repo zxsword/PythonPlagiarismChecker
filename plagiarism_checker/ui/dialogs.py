@@ -180,11 +180,10 @@ class AiReviewDialog(tk.Toplevel):
         # 我们有两个 Text 控件：一个是单纯显示 1,2,3 的行号框，一个是显示代码的框。
         # 当用户拉动滚动条时，必须让这两个框同时上下移动，否则行号就错位了。
         def sync_line_and_scroll(*args):
-            # args 通常包含 ('moveto', '0.5') 这种滚动位置信息
-            # 让滚动条移动
+            # yscrollcommand 回调的 args 是 (first, last)，即可见区域的上下分数
             code_scroll_y.set(*args)
-            # 强制让行号框也移动到相同的比例位置
-            line_widget.yview_moveto(args[0])
+            # 用 code_text.yview()[0] 而非 args[0]，避免行高舍入导致行号偏移
+            line_widget.yview_moveto(code_text.yview()[0])
             
         def on_scrollbar_scroll(*args):
             code_text.yview(*args)

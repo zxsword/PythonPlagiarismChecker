@@ -118,9 +118,10 @@ class ComparisonWindow(tk.Toplevel):
             scroll_x = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=text_widget.xview)
             
             # 使用闭包，当文本框Y轴滚动时，同时更新滚动条和旁边的行号框
-            def sync_line_and_scroll(*args, sy=scroll_y.set, lw=line_widget):
+            def sync_line_and_scroll(*args, sy=scroll_y.set, lw=line_widget, tw=text_widget):
                 sy(*args)
-                lw.yview_moveto(args[0])
+                # 用 text_widget.yview()[0] 而非 args[0]，避免行高舍入导致行号偏移
+                lw.yview_moveto(tw.yview()[0])
                 
             text_widget.config(yscrollcommand=sync_line_and_scroll, xscrollcommand=scroll_x.set)
             

@@ -31,13 +31,13 @@ def _init_compare_worker(contents):
     _global_file_contents = contents
 
 def _compare_worker(pair):
-    """在子进程中执行实际的查重比对任务"""
+    """在子进程中执行实际的查重比对任务。出错时返回错误信息而非静默为 0.0。"""
     f1, f2 = pair
     try:
         sim = difflib.SequenceMatcher(None, _global_file_contents[f1], _global_file_contents[f2]).ratio()
-        return pair, sim
-    except Exception:
-        return pair, 0.0
+        return pair, sim, None
+    except Exception as e:
+        return pair, 0.0, str(e)
 
 def _normalize_worker(args):
     """在子进程中执行代码标准化解析"""
@@ -189,14 +189,16 @@ def find_suspicious_pairs(files_to_check, threshold, advanced_mode=False, progre
     try:
         total_pairs = len(pairs)
         completed_pairs = 0
-        for pair, similarity in pool2.imap_unordered(_compare_worker, pairs, chunksize=chunk_size):
+        for pair, similarity, err in pool2.imap_unordered(_compare_worker, pairs, chunksize=chunk_size):
             if cancel_event and cancel_event.is_set():
                 break
             completed_pairs += 1
             # 每完成 1% 的进度更新一次UI，防止 UI 线程被高频挤死
             if progress_cb and completed_pairs % max(1, total_pairs // 100) == 0:
                 progress_cb(completed_pairs, total_pairs, "比对")
-            if similarity >= threshold:
+            if err:
+                errors[f"{pair[0]} <-> {pair[1]}"] = f"比对出错: {err}"
+            elif similarity >= threshold:
                 suspicious_pairs.append((pair, similarity))
     except Exception:
         pass
