@@ -31,11 +31,13 @@ run.bat
 
 ## 运行测试
 
-```bash
-# 运行所有测试
-python -m pytest tests/
+测试基于标准库 `unittest`，不需要安装 pytest。
 
-# 运行单个测试文件（对 analysis.py 的核心逻辑测试）
+```bash
+# 运行所有测试（unittest 自动发现）
+python -m unittest discover -s tests
+
+# 运行单个测试文件
 python tests/test_analysis.py
 ```
 
