@@ -1,7 +1,18 @@
 # 忽略包含敏感信息的真实配置文件
 config.yaml
+.env
 
 # 忽略常见的 Python 缓存和虚拟环境文件
 __pycache__/
 venv/
-.env
+*.pyc
+
+# 单元测试 setUp 创建的临时目录（Windows 上 tearDown 偶尔清不掉）
+temp_test_files/
+
+# 运行时日志目录（后续 Commit 9 会启用）
+logs/
+
+# 编辑器/系统/工具本地状态
+.claude/
+.DS_Store
