@@ -11,6 +11,7 @@
 import ast  # Abstract Syntax Tree, 用于将代码解析成语法树结构
 import re  # Regular Expressions, 用于文本的模式匹配（主要用于后备的标准化方法）
 import difflib  # 用于比较序列（比如文本行）的差异
+import threading
 from itertools import combinations  # 用于生成所有可能的文件组合
 import concurrent.futures
 import multiprocessing
@@ -42,6 +43,23 @@ def _normalize_worker(args):
     """在子进程中执行代码标准化解析"""
     path, advanced_mode = args
     return path, normalize_code(path, advanced_mode)
+
+
+def _start_cancel_watcher(pool, cancel_event):
+    """
+    启动一个守护线程，在 cancel_event 被设置时立即终结进程池。
+    这样用户点击"取消"后无需等待当前任务完成，响应近乎即时。
+    """
+    if cancel_event is None:
+        return None
+
+    def _watch():
+        cancel_event.wait()   # 阻塞直到事件触发
+        pool.terminate()      # 立即终结所有子进程
+
+    t = threading.Thread(target=_watch, daemon=True)
+    t.start()
+    return t
 
 def normalize_code(file_path, advanced_mode=False):
     """
@@ -132,6 +150,8 @@ def find_suspicious_pairs(files_to_check, threshold, advanced_mode=False, progre
     # 第一步：并发执行代码标准化 (CPU密集型：AST解析)
     norm_args = [(path, advanced_mode) for path in files_to_check]
     pool = multiprocessing.Pool()
+    # watchdog 线程：cancel_event 触发时立即终结进程池，无需等当前任务完成
+    _start_cancel_watcher(pool, cancel_event)
     try:
         total_norm = len(norm_args)
         completed_norm = 0
@@ -144,8 +164,10 @@ def find_suspicious_pairs(files_to_check, threshold, advanced_mode=False, progre
                 file_contents[path] = normalized_code
             else:
                 errors[path] = "无法读取或处理此文件。"
+    except Exception:
+        # pool 被 watchdog terminate 后，imap 迭代器会抛出管道/进程异常，静默处理即可
+        pass
     finally:
-        # 无论正常结束还是被用户点击取消，都暴力终结所有子进程释放内存
         pool.terminate()
         pool.join()
 
@@ -163,6 +185,7 @@ def find_suspicious_pairs(files_to_check, threshold, advanced_mode=False, progre
     chunk_size = max(1, len(pairs) // (multiprocessing.cpu_count() * 4))
 
     pool2 = multiprocessing.Pool(initializer=_init_compare_worker, initargs=(file_contents,))
+    _start_cancel_watcher(pool2, cancel_event)
     try:
         total_pairs = len(pairs)
         completed_pairs = 0
@@ -175,6 +198,8 @@ def find_suspicious_pairs(files_to_check, threshold, advanced_mode=False, progre
                 progress_cb(completed_pairs, total_pairs, "比对")
             if similarity >= threshold:
                 suspicious_pairs.append((pair, similarity))
+    except Exception:
+        pass
     finally:
         pool2.terminate()
         pool2.join()

@@ -3,6 +3,7 @@ import unittest
 import os
 import shutil
 import sys
+import threading
 
 # 为了让这个测试文件能够找到位于父目录的 plagiarism_checker 包，
 # 我们需要将父目录的路径添加到 sys.path 中。
@@ -68,8 +69,14 @@ class TestAnalysis(unittest.TestCase):
 
     # tearDown 方法会在每个测试方法执行后被调用
     def tearDown(self):
-        """清理测试环境：删除临时目录和文件。"""
-        shutil.rmtree(self.test_dir)
+        """清理测试环境：删除临时目录和文件。Windows 上多进程测试后 OS 偶尔仍持有句柄，重试三次。"""
+        import time
+        for _ in range(3):
+            try:
+                shutil.rmtree(self.test_dir)
+                break
+            except PermissionError:
+                time.sleep(0.3)
 
     def test_normalization(self):
         """测试代码标准化功能是否正常工作。"""
@@ -124,6 +131,36 @@ class TestAnalysis(unittest.TestCase):
         # (original, different) 这一对不应该出现在结果中
         different_pair = tuple(sorted((self.file_paths["original.py"], self.file_paths["different.py"])))
         self.assertNotIn(different_pair, pairs_found, "不应将 different/original 对识别为可疑")
+
+    def test_cancel_immediate(self):
+        """测试立即取消：cancel_event 预先设置时，函数应立即返回空结果，不崩溃。"""
+        all_files = list(self.file_paths.values())
+        cancel_event = threading.Event()
+        cancel_event.set()  # 提前设置，模拟用户在任务刚启动时就点了取消
+
+        pairs, errors = find_suspicious_pairs(all_files, 0.8, cancel_event=cancel_event)
+        self.assertEqual(pairs, [], "立即取消后不应有任何结果")
+
+    def test_cancel_does_not_crash(self):
+        """测试在后台启动任务后中途取消，函数能正常返回不挂起。"""
+        all_files = list(self.file_paths.values())
+        cancel_event = threading.Event()
+
+        # 100ms 后触发取消（模拟用户在任务运行中途点取消）
+        def delayed_cancel():
+            import time
+            time.sleep(0.1)
+            cancel_event.set()
+
+        t = threading.Thread(target=delayed_cancel, daemon=True)
+        t.start()
+
+        # 应在合理时间内返回，不挂起
+        pairs, errors = find_suspicious_pairs(all_files, 0.8, cancel_event=cancel_event)
+        # 取消后结果可能为空或部分，但不应崩溃
+        self.assertIsInstance(pairs, list)
+        self.assertIsInstance(errors, dict)
+
 
 if __name__ == '__main__':
     # 这使得我们可以直接通过 `python tests/test_analysis.py` 来运行测试
