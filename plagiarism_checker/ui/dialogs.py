@@ -285,6 +285,10 @@ class AiJudgementDialog(tk.Toplevel):
 
         self.btn_frame = ttk.Frame(self)
         self.btn_frame.pack(side=tk.BOTTOM, pady=10)
+        # 关闭按钮从一开始就存在（处于禁用状态），分析完成后才启用。
+        # 这样用户在等待期间就能看到它，不会以为窗口卡死了。
+        self.close_btn = ttk.Button(self.btn_frame, text="我知道了，关闭报告", command=self.destroy, state=tk.DISABLED)
+        self.close_btn.pack()
 
         text_frame = ttk.Frame(self)
         text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
@@ -341,4 +345,4 @@ class AiJudgementDialog(tk.Toplevel):
         self.info_var.set("✅ AI 鉴定分析完成！")
         self.text_widget.insert(tk.END, result_text)
         self.text_widget.config(state=tk.DISABLED)
-        ttk.Button(self.btn_frame, text="我知道了，关闭报告", command=self.destroy).pack()
+        self.close_btn.config(state=tk.NORMAL)

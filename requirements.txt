@@ -1,9 +1,5 @@
-# UI 与 核心逻辑 (标准库，无需安装，仅作说明)
-# tkinter, ast, difflib, concurrent.futures, multiprocessing
+# 完整安装（含本地大模型支持）
+# 如果你不需要本地离线批改，只安装 requirements-base.txt 即可：
+#   pip install -r requirements-base.txt
 
-# 配置文件读写支持 (替代内置的 json 以支持多行文本)
-pyyaml>=6.0
-
-# AI 大模型相关依赖 (按需安装)
-gpt4all>=2.8.2       # 用于本地离线运行 Qwen 等开源大模型
-openai>=1.0.0        # 通用云端大模型接口（支持 DeepSeek, Kimi, 通义千问, Gemini 等）
+-r requirements-local.txt

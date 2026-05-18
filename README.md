@@ -37,9 +37,15 @@
    ```
 
 2. **安装依赖模块**
-   ```bash
-   pip install -r requirements.txt
-   ```
+
+   - 仅使用查重 + 云端批改：
+     ```bash
+     pip install -r requirements-base.txt
+     ```
+   - 同时使用本地离线大模型批改（需额外下载 GGUF 模型文件，占用约 2-8 GB 磁盘）：
+     ```bash
+     pip install -r requirements-local.txt
+     ```
 
 3. **配置初始化**
    复制配置模板文件并重命名为 `config.yaml`（该文件已加入 `.gitignore` 以防止密钥泄露）：
@@ -80,6 +86,34 @@ API Key 等敏感信息**不会存入 config.yaml**，单独保存在项目根�
 - **使用 DeepSeek**：API Base URL 填写 `https://api.deepseek.com/v1`，模型名称填写 `deepseek-chat`。
 - **使用 Kimi (Moonshot)**：API Base URL 填写 `https://api.moonshot.cn/v1`，模型名称填写 `moonshot-v1-8k`。
 - **使用 本地模型**：下载 `.gguf` 格式的开源模型，点击界面的导入按钮即可实现完全断网的离线批改。
+
+## 🗂️ 模块结构
+
+```
+main.py                                  # 入口，调用 multiprocessing.freeze_support()
+plagiarism_checker/
+  analysis.py                            # 核心算法：代码标准化、相似度、图论分组
+  grader.py                              # AutoGrader：三种批改模式调度（AST/云端/本地）
+  ai_service.py                          # 云端/本地 LLM 客户端 + LocalModelSingleton
+  prompts.py                             # 集中管理所有发给 AI 的 Prompt 模板
+  config.py                              # ConfigManager：config.yaml 读写（非敏感字段）
+  secrets.py                             # SecretsManager：.env 读写（API Key 等敏感字段）
+  exporter.py                            # CSV/HTML 报告导出
+  file_utils.py                          # 文件合并工具
+  task_runner.py                         # TaskRunner：查重+批改长任务的后台调度
+  log_config.py                          # 日志配置：按日轮转写入 logs/app.log
+  ui/
+    app.py                               # PlagiarismCheckerApp（主窗口，约 420 行）
+    widgets.py                           # 三个可复用 LabelFrame 组件
+    comparison_window.py                 # 并排差异对比窗口
+    dialogs.py                           # API 设置、评语查看、AI 审判等弹窗
+    theme.py                             # 颜色常量集中定义（PROFESSIONAL_THEME 等）
+    window_utils.py                      # center_window() 工具函数
+```
+
+## 🤝 关于本项目
+
+本项目由作者设计并持续维护，开发过程中借助了 AI 代码辅助工具（Claude Code）提升效率。所有功能设计、算法选型和教学注释均经过人工审核与迭代。
 
 ## 📄 开源协议
 

@@ -1,0 +1,8 @@
+# 基础依赖：查重 + 云端大模型批改所需（必须安装）
+# 标准库 (tkinter, ast, difflib, multiprocessing 等) 无需安装
+
+# 配置文件读写
+pyyaml>=6.0
+
+# 云端大模型通用接口（兼容 DeepSeek / Kimi / Gemini 等 OpenAI 格式）
+openai>=1.0.0

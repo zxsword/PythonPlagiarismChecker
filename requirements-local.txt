@@ -1,0 +1,8 @@
+# 本地大模型支持（可选）
+# 仅在需要"AI 本地大模型批改"时安装；未安装时程序仍可正常使用查重和云端批改功能
+# 安装命令：pip install -r requirements-local.txt
+
+-r requirements-base.txt
+
+# 本地离线 LLM 运行时（支持 Qwen、Gemma 等 GGUF 格式模型）
+gpt4all>=2.8.2
