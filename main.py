@@ -8,12 +8,14 @@
 
 # 从 ui.app 模块中导入主应用程序类 PlagiarismCheckerApp
 from plagiarism_checker.ui.app import PlagiarismCheckerApp
+from plagiarism_checker.log_config import setup_logging
 import multiprocessing
 
 # Python 的标准写法，确保只有当这个文件被直接运行时，下面的代码才会被执行
 # 如果这个文件被其他文件导入，则不会执行
 if __name__ == "__main__":
     multiprocessing.freeze_support()  # 必须添加这一句，否则 PyInstaller 打包后的多进程会无限弹窗或崩溃
+    setup_logging()  # 初始化文件日志（写入 logs/app.log，按日轮转）
     # 创建 PlagiarismCheckerApp 类的一个实例（对象）
     app = PlagiarismCheckerApp()
     

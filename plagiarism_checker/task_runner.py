@@ -18,6 +18,9 @@ import tkinter as tk
 
 from .analysis import find_suspicious_pairs, find_plagiarism_groups, detect_original_source
 from .grader import AutoGrader
+from .log_config import get_logger
+
+_logger = get_logger(__name__)
 
 
 class TaskRunner:
@@ -175,7 +178,8 @@ class TaskRunner:
             self.app.after(0, self._finish, params['run_plag'], params['run_grading'], suspicious_pairs, errors)
 
         except Exception as e:
-            # 防止后台线程"静默死亡"，把所有报错推到前台状态栏
+            # 防止后台线程"静默死亡"，把所有报错同时推到前台状态栏和日志文件
+            _logger.exception("后台任务发生致命崩溃")
             self.app.after(0, self.app.status_text.set, f"发生致命后台崩溃: {str(e)}")
             self.app.after(0, self.app.progress.stop)
             self.app.after(0, self.app.progress.pack_forget)

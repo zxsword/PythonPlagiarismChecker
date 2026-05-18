@@ -24,6 +24,9 @@ from ..config import ConfigManager
 from ..secrets import SecretsManager
 from ..file_utils import merge_files
 from ..task_runner import TaskRunner
+from ..log_config import get_logger
+
+_logger = get_logger(__name__)
 
 class PlagiarismCheckerApp(tk.Tk):
     """
@@ -221,6 +224,7 @@ class PlagiarismCheckerApp(tk.Tk):
                 self.save_config()
                 self.status_text.set(f"成功导入并选中本地模型: {model_name}")
             except Exception as e:
+                _logger.error("导入本地模型失败: %s", e)
                 self.status_text.set(f"导入模型失败: {e}")
 
     def open_api_dialog(self):
@@ -299,6 +303,7 @@ class PlagiarismCheckerApp(tk.Tk):
             count = merge_files(self.selected_files, save_path)
             self.status_text.set(f"合并完成！已将 {count} 份作业合并保存至: {save_path}")
         except Exception as e:
+            _logger.error("合并导出失败: %s", e)
             self.status_text.set(f"合并导出失败: {str(e)}")
 
     def _add_single_ai_result(self, file_path, score, method, status, review, is_error=False, custom_name=None):
@@ -355,6 +360,7 @@ class PlagiarismCheckerApp(tk.Tk):
                 export_csv_report(file_path, current_tab, tree_to_export, self.ai_results_map)
             self.status_text.set(f"报告已成功导出到: {file_path}")
         except Exception as e:
+            _logger.error("导出报告失败: %s", e)
             self.status_text.set(f"导出报告失败: {str(e)}")
 
     def show_ai_review(self):
