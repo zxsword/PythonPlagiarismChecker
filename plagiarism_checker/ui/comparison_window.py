@@ -165,96 +165,93 @@ class ComparisonWindow(tk.Toplevel):
                 text_widget.yview_moveto(source_pos[0])
 
     def load_and_highlight(self):
-        """加载所有文件的内容，并使用基准文件高亮差异。"""
+        “””加载所有文件内容并完成差异高亮，入口方法负责串联四个步骤。”””
+        contents = self._read_file_contents()
+        baseline_idx = self.file_paths.index(self.original_path) if self.original_path in self.file_paths else 0
+        self._populate_text_widgets(contents)
+        self._compute_highlights(contents, baseline_idx)
+        self._finalize_and_apply_theme()
+
+    def _read_file_contents(self) -> list:
+        “””读取所有文件的行列表，读取失败时插入占位符行。”””
         contents = []
         for path in self.file_paths:
             try:
                 with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                     contents.append(f.readlines())
             except IOError:
-                contents.append(["错误：无法读取文件。\n"])
+                contents.append([“错误：无法读取文件。\n”])
+        return contents
 
-        # 确定基准文件索引（如果提供了疑似原创文件，则使用它；否则使用第一个文件）
-        baseline_idx = 0
-        if self.original_path in self.file_paths:
-            baseline_idx = self.file_paths.index(self.original_path)
-
-        # 插入内容并配置样式
+    def _populate_text_widgets(self, contents: list) -> None:
+        “””将文件内容和行号分别填入对应的 Text 控件。”””
         for i, (text_widget, lines) in enumerate(zip(self.text_widgets, contents)):
-            
-            # 提高 sel (选中状态) 标签的优先级，确保蓝底白字的高亮不被上面的背景色覆盖
-            text_widget.tag_raise("sel")
-            
+            # 提高 sel (选中状态) 标签的优先级，确保蓝底白字的高亮不被背景色覆盖
+            text_widget.tag_raise(“sel”)
             for line in lines:
                 text_widget.insert(tk.END, line)
-                
-            # 注入行号数字
+
             line_widget = self.line_widgets[i]
             line_widget.config(state=tk.NORMAL)
             for line_num in range(1, len(lines) + 1):
-                line_widget.insert(tk.END, f"{line_num}\n")
+                line_widget.insert(tk.END, f”{line_num}\n”)
             line_widget.config(state=tk.DISABLED)
 
-        # 进行高亮比对
+    def _compute_highlights(self, contents: list, baseline_idx: int) -> None:
+        “””对每个非基准文件运行 difflib，并为所有差异/相同区域打 tag。
+
+        【教学说明】get_opcodes() 返回的指令元组：
+        (操作类型, 基准起始行, 基准结束行, 对比起始行, 对比结束行)
+        - 'equal'  : 两边一模一样，即疑似抄袭部分
+        - 'replace': 这段代码被替换成别的样子
+        - 'delete' : 基准文件里的这段代码在对比文件里被删掉了
+        - 'insert' : 对比文件在这里新增了一段代码
+        “””
         baseline_lines = contents[baseline_idx]
         baseline_widget = self.text_widgets[baseline_idx]
 
         for i, text_widget in enumerate(self.text_widgets):
             if i == baseline_idx:
                 continue
-            
+
             compare_lines = contents[i]
             seq_matcher = difflib.SequenceMatcher(None, baseline_lines, compare_lines)
 
-            # 【教学说明】强大的 difflib 底层比对
-            # get_opcodes() 会返回一组指令，告诉你要怎么做，才能把“基准文件”变成“对比文件”。
-            # 它返回的每个指令是一个元组：(操作类型, 基准起始行, 基准结束行, 对比起始行, 对比结束行)
-            # 操作类型有四种：
-            # 'equal'   : 两边一模一样（这就是疑似抄袭的部分）
-            # 'replace' : 这一段代码被替换成了别的样子
-            # 'delete'  : 基准文件里的这段代码，在对比文件里被删掉了
-            # 'insert'  : 对比文件在这里悄悄新增了一段代码
             for tag, i1, i2, j1, j2 in seq_matcher.get_opcodes():
                 if tag == 'equal':
-                    # 标记相同代码（即抄袭部分），供切换主题使用
-                    baseline_widget.tag_add("identical", f"{i1 + 1}.0", f"{i2 + 1}.0")
-                    text_widget.tag_add("identical", f"{j1 + 1}.0", f"{j2 + 1}.0")
+                    baseline_widget.tag_add(“identical”, f”{i1 + 1}.0”, f”{i2 + 1}.0”)
+                    text_widget.tag_add(“identical”, f”{j1 + 1}.0”, f”{j2 + 1}.0”)
                 elif tag in ('replace', 'insert', 'delete'):
-                    # 有差异的部分背景
                     if tag in ('replace', 'delete'):
-                        baseline_widget.tag_add("diff_bg_del", f"{i1 + 1}.0", f"{i2 + 1}.0")
+                        baseline_widget.tag_add(“diff_bg_del”, f”{i1 + 1}.0”, f”{i2 + 1}.0”)
                     if tag in ('replace', 'insert'):
-                        text_widget.tag_add("diff_bg_add", f"{j1 + 1}.0", f"{j2 + 1}.0")
-                        
+                        text_widget.tag_add(“diff_bg_add”, f”{j1 + 1}.0”, f”{j2 + 1}.0”)
+
                     if tag == 'replace':
-                        # 逐行进行行内高亮
+                        # 逐行进行行内字符级高亮
                         for line_offset in range(max(i2 - i1, j2 - j1)):
                             bl_idx = i1 + line_offset
                             comp_idx = j1 + line_offset
-                            
                             if bl_idx < i2 and comp_idx < j2:
-                                bl_line = baseline_lines[bl_idx]
-                                comp_line = compare_lines[comp_idx]
-                                char_matcher = difflib.SequenceMatcher(None, bl_line, comp_line)
+                                char_matcher = difflib.SequenceMatcher(None, baseline_lines[bl_idx], compare_lines[comp_idx])
                                 for c_tag, ci1, ci2, cj1, cj2 in char_matcher.get_opcodes():
                                     if c_tag in ('replace', 'delete'):
-                                        baseline_widget.tag_add("diff_del", f"{bl_idx + 1}.{ci1}", f"{bl_idx + 1}.{ci2}")
+                                        baseline_widget.tag_add(“diff_del”, f”{bl_idx + 1}.{ci1}”, f”{bl_idx + 1}.{ci2}”)
                                     if c_tag in ('replace', 'insert'):
-                                        text_widget.tag_add("diff_add", f"{comp_idx + 1}.{cj1}", f"{comp_idx + 1}.{cj2}")
+                                        text_widget.tag_add(“diff_add”, f”{comp_idx + 1}.{cj1}”, f”{comp_idx + 1}.{cj2}”)
                             elif bl_idx < i2:
-                                baseline_widget.tag_add("diff_del", f"{bl_idx + 1}.0", f"{bl_idx + 2}.0")
+                                baseline_widget.tag_add(“diff_del”, f”{bl_idx + 1}.0”, f”{bl_idx + 2}.0”)
                             elif comp_idx < j2:
-                                text_widget.tag_add("diff_add", f"{comp_idx + 1}.0", f"{comp_idx + 2}.0")
+                                text_widget.tag_add(“diff_add”, f”{comp_idx + 1}.0”, f”{comp_idx + 2}.0”)
                     elif tag == 'delete':
-                        baseline_widget.tag_add("diff_del", f"{i1 + 1}.0", f"{i2 + 1}.0")
+                        baseline_widget.tag_add(“diff_del”, f”{i1 + 1}.0”, f”{i2 + 1}.0”)
                     elif tag == 'insert':
-                        text_widget.tag_add("diff_add", f"{j1 + 1}.0", f"{j2 + 1}.0")
+                        text_widget.tag_add(“diff_add”, f”{j1 + 1}.0”, f”{j2 + 1}.0”)
 
-        # 锁定所有代码文本框，防止用户在对比窗口中意外修改代码导致错乱
+    def _finalize_and_apply_theme(self) -> None:
+        “””锁定所有代码文本框（防误操作），然后应用默认配色主题。”””
         for text_widget in self.text_widgets:
             text_widget.config(state=tk.DISABLED)
-
-        # 所有标签添加完毕后，应用默认主题渲染
         self.apply_theme()
 
     def apply_theme(self, event=None):
