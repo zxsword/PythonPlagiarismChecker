@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f4f7f6;
+      color: #333;
+      padding: 30px;
+      margin: 0;
+    }
+    h1 { text-align: center; color: #2c3e50; margin-bottom: 5px; }
+    .date { text-align: center; color: #7f8c8d; margin-bottom: 30px; font-size: 14px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 15px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+      vertical-align: top;
+    }
+    th { background-color: #2980b9; color: white; font-weight: 600; }
+    tr:hover { background-color: #f9f9f9; }
+    .review {
+      background: #f1f8ff;
+      border-left: 4px solid #3498db;
+      padding: 15px;
+      margin-top: 10px;
+      white-space: pre-wrap;
+      font-size: 14px;
+      line-height: 1.6;
+      border-radius: 0 4px 4px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>${title}</h1>
+  <div class="date">生成时间: ${generated_at}</div>
+  <table>
+    ${table_header}
+    ${table_rows}
+  </table>
+</body>
+</html>

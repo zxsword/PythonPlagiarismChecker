@@ -7,6 +7,17 @@
 
 import csv
 import time
+import os
+from string import Template
+from pathlib import Path
+
+# HTML 模板文件与本模块同目录
+_TEMPLATE_PATH = Path(__file__).parent / "report_template.html"
+
+def _load_template() -> Template:
+    """读取 HTML 模板文件，返回 string.Template 对象。"""
+    with open(_TEMPLATE_PATH, encoding='utf-8') as f:
+        return Template(f.read())
 
 def export_csv_report(file_path, current_tab, tree_to_export, ai_results_map):
     """导出纯文本 CSV 报告"""
@@ -29,45 +40,68 @@ def export_csv_report(file_path, current_tab, tree_to_export, ai_results_map):
                 writer.writerow([name, score, method, values[2], review])
 
 def export_html_report(file_path, current_tab, tree_to_export, ai_results_map):
-    """生成带有 CSS 排版和高亮表格的精美 HTML 网页报告"""
-    html_content = [
-        "<!DOCTYPE html><html lang='zh-CN'><head><meta charset='UTF-8'><title>代码分析报告</title>",
-        "<style>",
-        "body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; color: #333; padding: 30px; margin: 0; }",
-        "h1 { text-align: center; color: #2c3e50; margin-bottom: 5px; }",
-        ".date { text-align: center; color: #7f8c8d; margin-bottom: 30px; font-size: 14px; }",
-        ".summary { display: flex; justify-content: center; gap: 20px; margin-bottom: 30px; }",
-        ".card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; min-width: 180px; }",
-        ".card h3 { margin: 0; font-size: 14px; color: #7f8c8d; text-transform: uppercase; }",
-        ".card p { margin: 10px 0 0; font-size: 32px; font-weight: bold; color: #2980b9; }",
-        "table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }",
-        "th, td { padding: 15px; text-align: left; border-bottom: 1px solid #eee; vertical-align: top; }",
-        "th { background-color: #2980b9; color: white; font-weight: 600; }",
-        "tr:hover { background-color: #f9f9f9; }",
-        ".review { background: #f1f8ff; border-left: 4px solid #3498db; padding: 15px; margin-top: 10px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; border-radius: 0 4px 4px 0; }",
-        "</style></head><body>"
-    ]
-    
-    title = "🔍 代码抄袭检测报告" if current_tab == 0 else "📝 AI 自动批改报告"
-    html_content.append(f"<h1>{title}</h1>")
-    html_content.append(f"<div class='date'>生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}</div>")
-    
-    html_content.append("<table>")
+    """生成带有 CSS 排版和高亮表格的精美 HTML 网页报告。
+
+    报告结构由 report_template.html 决定，本函数只负责填充数据。
+    """
+    tmpl = _load_template()
+
     if current_tab == 0:
-        html_content.append("<tr><th>分组文件数</th><th>最高相似度</th><th>疑似原创文件</th><th>所有成员</th></tr>")
-        for item_id in tree_to_export.get_children():
-            v = tree_to_export.item(item_id)['values']
-            sim_val = str(v[1]).replace('%', '')
-            color = "color: #e74c3c; font-weight: bold;" if sim_val.replace('.', '', 1).isdigit() and float(sim_val) >= 90 else ""
-            html_content.append(f"<tr><td>{v[0]}</td><td style='{color}'>{v[1]}</td><td>{v[2]}</td><td>{v[3]}</td></tr>")
+        title = "🔍 代码抄袭检测报告"
+        table_header = "<tr><th>分组文件数</th><th>最高相似度</th><th>疑似原创文件</th><th>所有成员</th></tr>"
+        table_rows = _build_plag_rows(tree_to_export)
     else:
-        html_content.append("<tr><th>文件名</th><th>评分</th><th>状态</th><th>详细评语</th></tr>")
-        for item_id in tree_to_export.get_children():
-            v = tree_to_export.item(item_id)['values']
-            name, score, method, review = ai_results_map.get(item_id, ("", "-", "", ""))
-            color = "color: #e74c3c; font-weight: bold;" if str(score).isdigit() and int(score) < 60 else ("color: #27ae60; font-weight: bold;" if str(score).isdigit() and int(score) >= 90 else "")
-            html_content.append(f"<tr><td width='15%'><b>{name}</b></td><td width='10%' style='{color}; font-size: 18px;'>{score}</td><td width='15%'>{v[2]}<br><small style='color:gray;'>{method}</small></td><td><div class='review'>{review}</div></td></tr>")
-    html_content.append("</table></body></html>")
-    
+        title = "📝 AI 自动批改报告"
+        table_header = "<tr><th>文件名</th><th>评分</th><th>状态</th><th>详细评语</th></tr>"
+        table_rows = _build_grading_rows(tree_to_export, ai_results_map)
+
+    html = tmpl.substitute(
+        title=title,
+        generated_at=time.strftime('%Y-%m-%d %H:%M:%S'),
+        table_header=table_header,
+        table_rows=table_rows,
+    )
+
     with open(file_path, 'w', encoding='utf-8') as f:
-        f.write("\n".join(html_content))
+        f.write(html)
+
+def _build_plag_rows(tree) -> str:
+    """构建抄袭检测结果的 HTML 表格行。"""
+    rows = []
+    for item_id in tree.get_children():
+        v = tree.item(item_id)['values']
+        sim_val = str(v[1]).replace('%', '')
+        color = ""
+        if sim_val.replace('.', '', 1).isdigit() and float(sim_val) >= 90:
+            color = "color: #e74c3c; font-weight: bold;"
+        rows.append(
+            f"<tr>"
+            f"<td>{v[0]}</td>"
+            f"<td style='{color}'>{v[1]}</td>"
+            f"<td>{v[2]}</td>"
+            f"<td>{v[3]}</td>"
+            f"</tr>"
+        )
+    return "\n    ".join(rows)
+
+def _build_grading_rows(tree, ai_results_map) -> str:
+    """构建 AI 批改结果的 HTML 表格行。"""
+    rows = []
+    for item_id in tree.get_children():
+        v = tree.item(item_id)['values']
+        name, score, method, review = ai_results_map.get(item_id, ("", "-", "", ""))
+        if str(score).isdigit() and int(score) < 60:
+            color = "color: #e74c3c; font-weight: bold;"
+        elif str(score).isdigit() and int(score) >= 90:
+            color = "color: #27ae60; font-weight: bold;"
+        else:
+            color = ""
+        rows.append(
+            f"<tr>"
+            f"<td width='15%'><b>{name}</b></td>"
+            f"<td width='10%' style='{color}; font-size: 18px;'>{score}</td>"
+            f"<td width='15%'>{v[2]}<br><small style='color:gray;'>{method}</small></td>"
+            f"<td><div class='review'>{review}</div></td>"
+            f"</tr>"
+        )
+    return "\n    ".join(rows)
