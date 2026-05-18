@@ -12,6 +12,7 @@ import concurrent.futures
 import threading
 from pathlib import Path
 from .analysis import evaluate_code_quality_ast
+from .prompts import build_grading_prompt, MAX_TOKENS_VERBOSE, MAX_TOKENS_BRIEF
 
 class AutoGrader:
     def __init__(self, grading_method, files_to_check, exercise_text, require_suggestions, 
@@ -120,25 +121,10 @@ class AutoGrader:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                     source_code = f.read()
                     
-                numbered_source = "\n".join([f"{idx+1} | {line}" for idx, line in enumerate(source_code.split('\n'))])
-                
-                prompt = "你是一个负责给Python初学者批改作业的严格老师。满分100分。\n"
-                if self.exercise_text:
-                    prompt += f"【评分细则】：\n{self.exercise_text}\n请严格按照细则审查并扣分。\n"
-                
-                prompt += "\n为了保持报告清晰，你【必须且只能】按以下固定模板输出，不要说任何废话客套话：\n"
-                prompt += "【最终评分】: [填入0-100的纯数字]分\n"
-                prompt += "【扣分明细】:\n"
-                
-                if self.require_suggestions:
-                    prompt += "- 第[X]行：[指出错误] -> [给出修改建议] (扣[Y]分)\n"
-                    prompt += "【总体评价】:\n[一段50字以内的精炼总结]\n"
-                else:
-                    prompt += "- 第[X]行：[一句话指出错误] (扣[Y]分)\n"
-                    prompt += "【总体评价】:\n[一句10字以内的简短总结]\n"
-                    
-                prompt += f"\n带行号的代码如下：\n```python\n{numbered_source}\n```"
-                
+                prompt = build_grading_prompt(
+                    self.exercise_text, self.require_suggestions, source_code, verbose=False
+                )
+
                 max_retries = 8
                 for attempt in range(max_retries):
                     try:
@@ -283,27 +269,10 @@ class AutoGrader:
                     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                         source_code = f.read()
                     
-                    # 为源代码添加行号，方便本地模型精确定位错误
-                    numbered_source = "\n".join([f"{idx+1} | {line}" for idx, line in enumerate(source_code.split('\n'))])
-                        
-                    prompt = "你是一个负责给Python初学者批改作业的严格老师。满分100分。\n"
-                    if self.exercise_text:
-                        prompt += f"【评分细则】：\n{self.exercise_text}\n请严格按照细则审查并扣分。\n"
-                    
-                    prompt += "\n为了保持报告清晰，你【必须且只能】按以下固定模板输出，不要说任何废话客套话：\n"
-                    prompt += "【最终评分】: [填入0-100的纯数字]分\n"
-                    prompt += "【扣分明细】:\n"
-                    
-                    if self.require_suggestions:
-                        prompt += "- 第[X]行：[指出错误] -> [给出详细的修改建议和代码示例] (扣[Y]分)\n"
-                        prompt += "【总体评价】:\n[一段100字以内的精炼总结]\n"
-                        max_tok = 1024  # 大幅放宽字数限制，允许模型输出长篇建议
-                    else:
-                        prompt += "- 第[X]行：[一句话指出错误] (扣[Y]分)\n"
-                        prompt += "【总体评价】:\n[一句10字以内的简短总结]\n"
-                        max_tok = 256
-                        
-                    prompt += f"\n带行号的代码如下：\n```python\n{numbered_source}\n```"
+                    prompt = build_grading_prompt(
+                        self.exercise_text, self.require_suggestions, source_code, verbose=True
+                    )
+                    max_tok = MAX_TOKENS_VERBOSE if self.require_suggestions else MAX_TOKENS_BRIEF
                     with model.chat_session():
                         # temp=0.3 可以在保持格式严谨的同时，让语言更加自然丰富
                         reply = model.generate(prompt, max_tokens=max_tok, temp=0.3)

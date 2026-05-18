@@ -299,15 +299,8 @@ class AiJudgementDialog(tk.Toplevel):
         threading.Thread(target=self._run_analysis, daemon=True).start()
         
     def _run_analysis(self):
-        prompt = f"""你是一个资深的计算机科学教授和极具洞察力的代码查重专家。
-请对以下两份初学者的 Python 代码进行深度对比分析，判断它们是否存在互相抄袭的行为。
-请重点分析并分条指出：
-1. 核心逻辑、算法流程以及特殊数值是否高度一致？
-2. 是否存在为了掩人耳目而故意修改变量名、调换无关语句顺序、增删无用代码或注释的“洗稿”行为？
-3. 给出你的最终鉴定结论（例如：高度疑似抄袭 / 仅仅是思路相似的独立完成）。
-
-【代码 A ({self.name_a})】：\n```python\n{self.code_a}\n```\n
-【代码 B ({self.name_b})】：\n```python\n{self.code_b}\n```"""
+        from ..prompts import build_judgement_prompt
+        prompt = build_judgement_prompt(self.code_a, self.code_b, self.name_a, self.name_b)
         try:
             method = self.grading_method_val
             if "本地" in method:

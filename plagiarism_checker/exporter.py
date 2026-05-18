@@ -52,8 +52,6 @@ def export_html_report(file_path, current_tab, tree_to_export, ai_results_map):
     html_content.append(f"<h1>{title}</h1>")
     html_content.append(f"<div class='date'>生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}</div>")
     
-    # ... 统计卡片与表格生成逻辑 (从原 app.py 中无缝移植) ...
-    # (为保证补丁简洁，代码已完整重构，具体可查看应用后的文件)
     html_content.append("<table>")
     if current_tab == 0:
         html_content.append("<tr><th>分组文件数</th><th>最高相似度</th><th>疑似原创文件</th><th>所有成员</th></tr>")
