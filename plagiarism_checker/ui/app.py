@@ -78,15 +78,9 @@ class PlagiarismCheckerApp(tk.Tk):
         self.secrets_manager = SecretsManager()  # 优先初始化，load_config 会用到
         self.config_manager = ConfigManager()
         self.load_config()  # 启动时自动加载配置（含旧版自动迁移）
-        
-        # 将需要在其他模块中引用的UI组件也在此处声明
-        self.file_listbox = None
-        self.notebook = None
-        self.tab_plag = None
-        self.result_tree = None
-        self.tab_ai = None
-        self.ai_tree = None
-        self.progress = None
+
+        # 关键 UI 控件不在这里占位；统一在 _init_ui 里从各 widgets 实例读回赋值，
+        # 这样 Ctrl+F 搜 self.file_listbox 等就能直接命中唯一定义点。
 
     def _init_ui(self):
         """初始化主窗口的用户界面布局。"""
@@ -105,10 +99,25 @@ class PlagiarismCheckerApp(tk.Tk):
         top_frame = ttk.Frame(self, padding="10")
         top_frame.pack(fill=tk.X)
 
+        # 各 widgets 把内部控件挂在自身上；这里读回赋给 self，作为这些控件
+        # 在 app.py 中的唯一定义点（Ctrl+F 可定位）。
         self.file_frame = FileSelectionFrame(top_frame, self)
         self.file_frame.pack(fill=tk.X)
-        TaskOptionsFrame(top_frame, self).pack(fill=tk.X, pady=10)
-        ResultsFrame(self, self).pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.file_listbox = self.file_frame.file_listbox
+
+        self.task_frame = TaskOptionsFrame(top_frame, self)
+        self.task_frame.pack(fill=tk.X, pady=10)
+        self.start_btn = self.task_frame.start_btn
+        self.cancel_btn = self.task_frame.cancel_btn
+
+        self.results_frame = ResultsFrame(self, self)
+        self.results_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.notebook = self.results_frame.notebook
+        self.tab_plag = self.results_frame.tab_plag
+        self.tab_ai = self.results_frame.tab_ai
+        self.result_tree = self.results_frame.result_tree
+        self.ai_tree = self.results_frame.ai_tree
+        self.progress = self.results_frame.progress
         
     def _init_menus(self):
         """初始化右键上下文菜单。"""
@@ -274,8 +283,7 @@ class PlagiarismCheckerApp(tk.Tk):
         for f in self.selected_files:
             self.file_listbox.insert(tk.END, os.path.basename(f)) # 只显示文件名，不显示完整路径
         # 动态更新面板标题以显示已添加的文件数量
-        if hasattr(self, 'file_frame'):
-            self.file_frame.config(text=f"选择待检查的代码 (当前共 {len(self.selected_files)} 份)")
+        self.file_frame.config(text=f"选择待检查的代码 (当前共 {len(self.selected_files)} 份)")
 
     def merge_and_export_files(self):
         """将列表中所有选中的文件合并为一个大文件并导出。"""
@@ -313,16 +321,14 @@ class PlagiarismCheckerApp(tk.Tk):
         self.suspicious_pairs_map.clear()
         for i in self.result_tree.get_children():
             self.result_tree.delete(i)
-            
-        if hasattr(self, 'ai_results_map'):
-            self.ai_results_map.clear()
-        if hasattr(self, 'ai_tree'):
-            for i in self.ai_tree.get_children():
-                self.ai_tree.delete(i)
+
+        self.ai_results_map.clear()
+        for i in self.ai_tree.get_children():
+            self.ai_tree.delete(i)
                 
     def _update_timer(self):
         """递归更新耗时秒表"""
-        if getattr(self, 'is_running', False):
+        if self.is_running:
             elapsed = int(time.time() - self.start_time)
             m, s = divmod(elapsed, 60)
             self.time_text.set(f"耗时: {m:02d}:{s:02d}")
@@ -330,14 +336,14 @@ class PlagiarismCheckerApp(tk.Tk):
 
     def run_check(self):
         """“开始运行”按钮的核心执行函数。"""
-        if getattr(self, 'is_running', False):
+        if self.is_running:
             self.status_text.set("任务正在运行中，请勿重复点击，请耐心等待...")
             return
-            
+
         self.is_running = True
         self.cancel_event.clear()
-        if hasattr(self, 'start_btn'): self.start_btn.config(state=tk.DISABLED)
-        if hasattr(self, 'cancel_btn'): self.cancel_btn.config(state=tk.NORMAL)
+        self.start_btn.config(state=tk.DISABLED)
+        self.cancel_btn.config(state=tk.NORMAL)
         self.start_time = time.time()
         self.time_text.set("耗时: 00:00")
         self._update_timer()  # 启动秒表
@@ -456,8 +462,8 @@ class PlagiarismCheckerApp(tk.Tk):
         self.progress.stop()
         self.progress.pack_forget()
         self.is_running = False
-        if hasattr(self, 'start_btn'): self.start_btn.config(state=tk.NORMAL)
-        if hasattr(self, 'cancel_btn'): self.cancel_btn.config(state=tk.DISABLED)
+        self.start_btn.config(state=tk.NORMAL)
+        self.cancel_btn.config(state=tk.DISABLED)
 
         # --- 1. 更新查重结果 ---
         if run_plag:
