@@ -11,7 +11,7 @@
 """
 
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog, ttk, simpledialog
 import os
 import shutil
 from pathlib import Path
@@ -122,6 +122,7 @@ class PlagiarismCheckerApp(tk.Tk):
         # --- 创建右键菜单 ---
         self.plag_menu = tk.Menu(self, tearoff=0)
         self.plag_menu.add_command(label="对比选中的抄袭文件", command=self.show_comparison)
+        self.plag_menu.add_command(label="设为本组原创", command=self.set_as_original)
 
         self.ai_menu = tk.Menu(self, tearoff=0)
         self.ai_menu.add_command(label="查看详细批改评语", command=self.show_ai_review)
@@ -331,10 +332,48 @@ class PlagiarismCheckerApp(tk.Tk):
         if not selected_items:
             self.status_text.set("请先在【抄袭检测结果】标签中选择一组代码。")
             return
-        
+
         item_id = selected_items[0]
         group_files, original_file = self.suspicious_pairs_map[item_id]
         ComparisonWindow(self, group_files, original_file)
+
+    def set_as_original(self):
+        """让用户手动指定本组的原创文件，覆盖启发式算法的推断结果。"""
+        selected_items = self.result_tree.selection()
+        if not selected_items:
+            self.status_text.set("请先在【抄袭检测结果】标签中选择一组代码。")
+            return
+
+        item_id = selected_items[0]
+        group_files, _ = self.suspicious_pairs_map[item_id]
+        file_names = [os.path.basename(f) for f in group_files]
+
+        # 弹出选择框：列出本组所有文件名，让用户选一个
+        choice = simpledialog.askstring(
+            title="设为本组原创",
+            prompt=(
+                "请输入本组原创文件的文件名（复制粘贴即可）：\n\n"
+                + "\n".join(f"  {n}" for n in file_names)
+            ),
+            parent=self,
+        )
+        if not choice:
+            return
+
+        # 根据文件名找到完整路径
+        new_original = next((f for f in group_files if os.path.basename(f) == choice.strip()), None)
+        if new_original is None:
+            self.status_text.set(f"未找到文件：{choice.strip()}，请确认文件名拼写正确。")
+            return
+
+        # 更新映射
+        self.suspicious_pairs_map[item_id] = (group_files, new_original)
+
+        # 刷新表格中"疑似原创文件"一列
+        current_values = list(self.result_tree.item(item_id, 'values'))
+        current_values[2] = os.path.basename(new_original)
+        self.result_tree.item(item_id, values=current_values)
+        self.status_text.set(f"已将本组原创文件手动设为：{os.path.basename(new_original)}")
 
     def export_report(self):
         """动态导出报告：当前在哪个标签页，就导出哪份报告"""
