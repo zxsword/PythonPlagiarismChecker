@@ -5,6 +5,7 @@ AI 服务模块
 实现网络请求环境设置、Client 初始化逻辑的复用与代码精简。
 """
 import os
+import threading
 from pathlib import Path
 
 def get_cloud_client(api_key, api_base="", api_proxy=""):
@@ -50,6 +51,9 @@ def load_local_model(model_name=None):
     """
     统一的本地 GPT4All 模型加载器。
     优先尝试 GPU 加速，若 GPU 不可用自动退回 CPU，并打印实际运行设备。
+
+    注意：本函数每次调用都会重新加载（10+ 秒）。生产路径请通过 LocalModelSingleton.get()
+    复用，避免连续多次批改/审判时反复加载。
     """
     from gpt4all import GPT4All
     cache_dir = os.path.join(Path.home(), ".cache", "gpt4all")
@@ -66,3 +70,39 @@ def load_local_model(model_name=None):
         model = GPT4All(name, model_path=cache_dir, allow_download=False, device='cpu')
         print("[本地模型] 已加载，运行在: CPU")
         return model
+
+
+class LocalModelSingleton:
+    """
+    进程级本地模型单例缓存。
+
+    背景：GPT4All 加载一次需要 10+ 秒。如果每次"批改"或"AI 深度审判"都重新调用
+    load_local_model，体验上像卡死。这里用 dict 做按模型名的缓存，同一进程内同一份
+    .gguf 只 load 一次，后续直接复用同一个 model 对象。
+
+    线程安全：用类级 Lock 保护 dict 的读写，防止两个线程同时触发首次 load 导致重复加载。
+    """
+    _instances: dict = {}
+    _lock = threading.Lock()
+
+    @classmethod
+    def get(cls, model_name=None):
+        """获取（必要时加载）指定名称的模型。线程安全。"""
+        key = model_name or "qwen2.5-3b-instruct-q4_k_m.gguf"
+        # 双重检查锁：第一次读不加锁，命中则零开销返回
+        if key in cls._instances:
+            return cls._instances[key]
+        with cls._lock:
+            # 进入锁后再次检查，避免两个线程并发首次加载
+            if key not in cls._instances:
+                cls._instances[key] = load_local_model(key)
+            return cls._instances[key]
+
+    @classmethod
+    def release(cls, model_name=None):
+        """显式释放缓存。不传 model_name 则释放全部。用于手动让出显存。"""
+        with cls._lock:
+            if model_name is None:
+                cls._instances.clear()
+            else:
+                cls._instances.pop(model_name, None)

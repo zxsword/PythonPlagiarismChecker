@@ -304,9 +304,10 @@ class AiJudgementDialog(tk.Toplevel):
         try:
             method = self.grading_method_val
             if "本地" in method:
-                self.after(0, lambda: self.info_var.set("正在加载本地大模型进行深度分析 (可能需要十几秒)..."))
-                from ..ai_service import load_local_model
-                model = load_local_model(self.local_model_val)
+                # 单例缓存：首次审判会真正加载（10+ 秒），后续审判/批改共用同一模型
+                self.after(0, lambda: self.info_var.set("正在加载本地大模型进行深度分析 (首次约 10 秒，后续秒开)..."))
+                from ..ai_service import LocalModelSingleton
+                model = LocalModelSingleton.get(self.local_model_val)
                 with model.chat_session():
                     reply = model.generate(prompt, max_tokens=1024, temp=0.3)
             else:

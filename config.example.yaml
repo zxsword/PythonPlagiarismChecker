@@ -9,6 +9,10 @@ api_base: ''
 api_model: 'gemini-1.5-flash'
 local_model: 'qwen2.5-3b-instruct-q4_k_m.gguf'
 
+# 云端 API 两次请求之间的最小间隔（秒）。Gemini 免费档建议 5.0；
+# DeepSeek/小米 mimo 等高并发账号可改成 0.2~0.5 加速批改。
+api_min_interval: 5.0
+
 # --- 作业/习题要求 ---
 exercise_text: ''
 

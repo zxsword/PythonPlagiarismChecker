@@ -15,8 +15,9 @@ from .analysis import evaluate_code_quality_ast
 from .prompts import build_grading_prompt, MAX_TOKENS_VERBOSE, MAX_TOKENS_BRIEF
 
 class AutoGrader:
-    def __init__(self, grading_method, files_to_check, exercise_text, require_suggestions, 
-                 api_key, api_base, api_model, local_model, api_proxy, status_cb, progress_cb, result_cb, cancel_event=None):
+    def __init__(self, grading_method, files_to_check, exercise_text, require_suggestions,
+                 api_key, api_base, api_model, local_model, api_proxy, status_cb, progress_cb, result_cb,
+                 cancel_event=None, min_interval=5.0):
         self.grading_method = grading_method
         self.files_to_check = files_to_check
         self.exercise_text = exercise_text
@@ -27,6 +28,9 @@ class AutoGrader:
         self.local_model = local_model
         self.api_proxy = api_proxy
         self.cancel_event = cancel_event
+        # 云端 API 两次请求之间的最小间隔（秒）。Gemini 免费档建议 5.0；
+        # DeepSeek/小米 mimo 等高并发账号可降到 0.2~0.5 显著提速。
+        self.min_interval = min_interval
         
         # 【教学说明】回调函数 (Callbacks) 的妙用
         # AutoGrader 只是一个在后台苦苦干活的“打工人类”，它不认识进度条，也不认识表格。
@@ -70,16 +74,19 @@ class AutoGrader:
             except Exception as e:
                 self.result_cb(file_path, "-", self.grading_method, f"评分出错: {str(e)}", f"出错详情: {str(e)}", True)
             finally:
+                # 把"增量计数 + 发状态"放进同一把锁内，避免两个线程把
+                # "5/10" 和 "6/10" 以错乱顺序推到 UI（旧实现把锁过早释放，
+                # 导致 UI 偶尔倒退一格）。after(0,...) 本身已经线程安全，锁
+                # 只是用来保证发送顺序。
                 with count_lock:
                     completed_count[0] += 1
                     c = completed_count[0]
-                if c > 0:
                     elapsed = time.time() - start_time
                     avg = elapsed / c
                     rem = len(self.files_to_check) - c
                     shared_eta[0] = f"{int(avg * rem)}秒"
-                self.progress_cb()
-                self.status_cb(f"已完成 {c}/{len(self.files_to_check)} | 预计剩余: {shared_eta[0]}")
+                    self.progress_cb()
+                    self.status_cb(f"已完成 {c}/{len(self.files_to_check)} | 预计剩余: {shared_eta[0]}")
 
         # 使用多线程加速 AST 文件解析
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -128,13 +135,16 @@ class AutoGrader:
                 max_retries = 8
                 for attempt in range(max_retries):
                     try:
-                        # 【核心限流逻辑】：强行让所有线程在此排队，保证任意两次 API 发送至少间隔 5 秒
-                        # 从根本上杜绝多线程同时发包引起的瞬间并发洪峰
+                        # 【核心限流逻辑】：强行让所有线程在此排队，保证任意两次 API 发送至少间隔 min_interval 秒
+                        # 从根本上杜绝多线程同时发包引起的瞬间并发洪峰。
+                        # min_interval 由 config.yaml 的 api_min_interval 字段配置：
+                        #   - Gemini 免费档建议 5.0 秒（默认）
+                        #   - DeepSeek/小米 mimo 等高并发账号可降到 0.2~0.5
                         with api_lock:
                             now = time.time()
                             elapsed = now - last_req_time[0]
-                            if elapsed < 5.0:
-                                if self.cancel_event and self.cancel_event.wait(5.0 - elapsed):
+                            if elapsed < self.min_interval:
+                                if self.cancel_event and self.cancel_event.wait(self.min_interval - elapsed):
                                     return
                             last_req_time[0] = time.time()
 
@@ -170,18 +180,19 @@ class AutoGrader:
             except Exception as e:
                 self.result_cb(file_path, "-", self.grading_method, f"批改失败: {str(e)}", f"详细报错: {str(e)}", True)
             finally:
+                # 同 _run_ast 注释：把"增量计数 + 发状态"放进同一把锁内，
+                # 防止云端线程间发出的 "5/10 / 6/10" 顺序倒错。
                 with count_lock:
                     completed_count[0] += 1
                     c = completed_count[0]
-                if c > 0:
                     elapsed = time.time() - start_time
                     avg = elapsed / c
                     rem = len(self.files_to_check) - c
                     eta = int(avg * rem)
                     m, s = divmod(eta, 60)
                     shared_eta[0] = f"{m}分{s}秒" if m > 0 else f"{s}秒"
-                self.progress_cb()
-                self.status_cb(f"已完成 {c}/{len(self.files_to_check)} | 预计剩余: {shared_eta[0]}")
+                    self.progress_cb()
+                    self.status_cb(f"已完成 {c}/{len(self.files_to_check)} | 预计剩余: {shared_eta[0]}")
 
         # 并发数设为3。得益于内部严格的 5 秒排队锁，API 的实际发出速率会被完美限制在 12 RPM 内，不再报错。
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
@@ -195,8 +206,8 @@ class AutoGrader:
     def _run_local_llm(self):
         try:
             import gpt4all
-            from .ai_service import load_local_model
-            
+            from .ai_service import LocalModelSingleton
+
             cache_dir = os.path.join(Path.home(), ".cache", "gpt4all")
             os.makedirs(cache_dir, exist_ok=True)
             model_name = self.local_model or "qwen2.5-3b-instruct-q4_k_m.gguf"
@@ -242,8 +253,9 @@ class AutoGrader:
                     return
                             
             self.status_cb("正在加载本地 AI 模型 (尝试启动 GPU 加速，已禁用后台联网)...")
-            model = load_local_model(model_name)
-            
+            # 通过单例缓存获取：首次会真正 load (10+ 秒)，后续调用直接复用同一对象
+            model = LocalModelSingleton.get(model_name)
+
             # 获取底层库实际分配的硬件设备（如果 GPU 显存不足，这里可能会显示返回了 CPU）
             actual_device = getattr(model, 'device', '未知设备')
             self.status_cb(f"模型加载成功！当前实际运行硬件: [{actual_device}]")

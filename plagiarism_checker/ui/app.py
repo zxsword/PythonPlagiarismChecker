@@ -68,6 +68,8 @@ class PlagiarismCheckerApp(tk.Tk):
         self.api_proxy = tk.StringVar(value="") # 存储代理地址
         self.api_model = tk.StringVar(value="gemini-1.5-flash") # 存储 Gemini 模型名称
         self.local_model = tk.StringVar(value="qwen2.5-3b-instruct-q4_k_m.gguf") # 存储本地模型名称
+        # 云端 API 两次请求之间的最小间隔（秒）。仅通过 config.yaml 调整，目前不在 UI 暴露。
+        self.api_min_interval = 5.0
         self.status_text = tk.StringVar(value="欢迎使用！请添加要检查的代码或文本文件。")  # 用于在状态栏显示信息
         self.is_running = False  # 防止重复点击运行按钮的并发锁
         self.time_text = tk.StringVar(value="耗时: 00:00") # 存储耗时文字
@@ -134,6 +136,11 @@ class PlagiarismCheckerApp(tk.Tk):
         self.api_base.set(config.get('api_base', ''))
         self.api_model.set(config.get('api_model', 'gemini-1.5-flash'))
         self.local_model.set(config.get('local_model', 'qwen2.5-3b-instruct-q4_k_m.gguf'))
+        # 容错：用户可能填了字符串或非法值，转不动就退回 5.0
+        try:
+            self.api_min_interval = float(config.get('api_min_interval', 5.0))
+        except (TypeError, ValueError):
+            self.api_min_interval = 5.0
         self.exercise_text = config.get('exercise_text', '')
 
         # UI 状态（阈值、开关、批改方式等）
@@ -159,6 +166,7 @@ class PlagiarismCheckerApp(tk.Tk):
             'api_base': self.api_base.get(),
             'api_model': self.api_model.get(),
             'local_model': self.local_model.get(),
+            'api_min_interval': self.api_min_interval,
             'exercise_text': self.exercise_text,
             'threshold': self.threshold.get(),
             'advanced_mode': bool(self.advanced_mode.get()),
@@ -427,7 +435,8 @@ class PlagiarismCheckerApp(tk.Tk):
                         status_cb=status_cb,
                         progress_cb=progress_cb,
                         result_cb=result_cb,
-                        cancel_event=self.cancel_event
+                        cancel_event=self.cancel_event,
+                        min_interval=self.api_min_interval,
                     )
                     grader.run()
 
