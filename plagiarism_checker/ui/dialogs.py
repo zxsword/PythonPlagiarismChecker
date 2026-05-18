@@ -26,7 +26,7 @@ class ApiSettingsDialog(tk.Toplevel):
         
         # 【教学说明】什么是模态窗口 (Modal Window)？
         # 有些弹窗打开后，你必须处理完它（比如点保存或关闭），否则底下的主窗口点不了。
-        # 这种“霸道”的窗口就叫模态窗口。
+        # 这种"霸道"的窗口就叫模态窗口。
         # transient(parent): 让这个弹窗依附在主窗口上，不会在任务栏出现多余的图标。
         # grab_set(): 捕获所有的鼠标和键盘事件，强制用户只能在这个弹窗里操作。
         self.transient(parent)
